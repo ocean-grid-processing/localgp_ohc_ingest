@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Pipeline round-trip check: does the published .nc match the upstream .mat?
 
-The companion to verify_store.py, but for the END of Component A: it confirms the published
-submission still equals the LocalGP .mat after the whole ingest+publish chain (mask applied,
+The companion to verify_store.py, but one stage later: it confirms the published submission
+still equals the LocalGP .mat after the whole ingest+publish chain (mask applied,
 J/m^2 -> TJ/m^2, time re-referenced to 1900). Uses scipy.io.loadmat as an independent reader.
 
     python verify_publish.py SUBMISSION.nc DIR_MEAN DIR_ENSEMBLE [--no-sd]

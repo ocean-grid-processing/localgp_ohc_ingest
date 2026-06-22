@@ -1,9 +1,8 @@
 //! WOA 0.25° basin mask → per-cell basin id on the mapping grid.
 //!
-//! Mirrors `WMO2024_interp_basins.m`: parse the text table (`Latitude, Longitude,
-//! Basin_<depth>m`), take the surface column (`Basin_0m`), wrap longitudes `<20 → +360`,
-//! and assign each 1° grid cell the basin of its nearest mask point by Euclidean distance
-//! in (lat, lon) degrees (MATLAB `knnsearch`).
+//! Parse the WOA 0.25° basin table (`Latitude, Longitude, Basin_<depth>m`), take the surface
+//! column (`Basin_0m`), wrap longitudes `<20 → +360`, and assign each 1° grid cell the basin
+//! of its nearest mask point by Euclidean distance in (lat, lon) degrees (nearest-neighbour).
 //!
 //! The mask points form a regular 0.25° lattice (ocean only), so instead of a kd-tree
 //! (which struggles with the ~1440 points sharing each latitude) we index into a dense

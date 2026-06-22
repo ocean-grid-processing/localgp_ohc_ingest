@@ -1,4 +1,4 @@
-# Python deps for the Component-A tooling: verify_store.py (cross-check) and publish.py.
+# Python deps for the ohc_ingest tooling: publish.py, verify_store.py, verify_publish.py.
 # Transitive deps (pandas, numcodecs, donfig, ...) are resolved automatically.
 numpy
 scipy             # verify: scipy.io.loadmat (independent .mat oracle)

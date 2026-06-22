@@ -22,7 +22,7 @@ impl LayerSpec {
     }
 }
 
-/// Static constants + paths. Mirrors the non-slice parts of `WMO2024_main_input_vars.m`.
+/// Static constants + paths for a run (everything except the per-run slice; see `Slice`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RunConfig {
     /// run identifier, set per-run via `--tag` (this default is a placeholder)

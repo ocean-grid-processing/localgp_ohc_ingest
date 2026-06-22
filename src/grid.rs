@@ -1,8 +1,8 @@
 //! Grid geometry — analytic spherical cell areas.
 //!
-//! Matches the MATLAB `areaquad(..., referenceSphere('earth'))` convention: a sphere of
-//! radius `EARTH_RADIUS_M`. For a cell centred at latitude φ spanning ±0.5° in lat and
-//! ±0.5° in lon, area = R² · Δλ · (sin φ_top − sin φ_bot). Area depends only on latitude.
+//! Spherical cell area on a sphere of radius `EARTH_RADIUS_M`. For a cell centred at latitude
+//! φ spanning ±0.5° in lat and ±0.5° in lon, area = R² · Δλ · (sin φ_top − sin φ_bot). Area
+//! depends only on latitude.
 
 use ndarray::Array2;
 

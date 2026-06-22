@@ -17,13 +17,13 @@ pub mod basinmask;
 pub mod ingest;
 pub mod zarrwrite;
 
-/// Physical / grid constants for the LocalGP product (see WMO2024_main_input_vars.m).
+/// Physical / grid constants for the LocalGP product. cp0/rho0 are the ME4OH-protocol values.
 pub mod consts {
-    /// Specific heat capacity, J/(kg·K) — McDougall 2003 (cp0).
+    /// Specific heat capacity, J/(kg·K) — ME4OH protocol (McDougall 2003).
     pub const CP0: f64 = 3989.244;
-    /// Reference density, kg/m³ (rho0).
+    /// Reference density, kg/m³ — ME4OH protocol.
     pub const RHO0: f64 = 1030.0;
-    /// Earth radius used for cell areas, m — matches MATLAB `referenceSphere('earth')`.
+    /// Earth radius used for cell areas, m (mean spherical Earth radius).
     pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
     /// Mapping grid longitude count (20.5 … 379.5, 1°).

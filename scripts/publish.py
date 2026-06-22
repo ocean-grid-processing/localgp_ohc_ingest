@@ -78,7 +78,7 @@ def main():
         data = data - data.mean("time")
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
-    # ddof=1 matches the MATLAB std convention; this reads all ensemble members.
+    # ddof=1 (sample standard deviation); this reads all ensemble members.
     include_sd = not args.no_uncertainty
     sd = (ds["ohc_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
 

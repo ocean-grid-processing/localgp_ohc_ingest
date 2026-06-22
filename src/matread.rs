@@ -170,9 +170,9 @@ pub fn read_ensemble(path: impl AsRef<Path>) -> Result<Array3<f64>> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests against the local 15_20 Aug-2016 sample. Set OHC_TEST_DATA to the dir
-// holding the two .mat files (e.g. postprocesser/data). Skipped if unset.
-// Ground-truth values locked via a Python reference parse of the same files.
+// Tests against a single sample month/layer. Set OHC_TEST_DATA to a dir holding the two
+// sample .mat files (FullField mean + LocalCondSim ensemble). Skipped if unset.
+// Ground-truth values locked via an independent Python parse of the same files.
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
