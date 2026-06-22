@@ -14,4 +14,4 @@
 module purge
 
 cd $SLURM_SUBMIT_DIR
-./ohc_ingest config.toml --years 2004:2025 --months 1:12 --layer 15-20 --tag localgp_dev
+./dist/ohc_ingest config.toml --years 2004:2025 --months 1:12 --layer 15-20 --tag localgp_dev
