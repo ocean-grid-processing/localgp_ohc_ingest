@@ -1,0 +1,27 @@
+# Build a fully static x86_64 musl binary — no libc, no dynamic linker, no runtime deps.
+# For clusters with neither Docker nor a Rust toolchain: build here, scp the one file up.
+# Works because the crate is 100% pure Rust (flate2 uses the miniz_oxide backend; no C deps).
+
+FROM rust:1-bookworm AS build
+RUN rustup target add x86_64-unknown-linux-musl
+WORKDIR /app
+COPY Cargo.toml ./
+COPY src ./src
+RUN cargo build --release --target x86_64-unknown-linux-musl
+
+# Export stage: just the binary, so `docker build --output` drops it on the host.
+FROM scratch AS bin
+COPY --from=build /app/target/x86_64-unknown-linux-musl/release/ohc_ingest /ohc_ingest
+
+# Build and extract the static binary to ./dist/ohc_ingest:
+#   docker build -f Dockerfile.static --target bin --output type=local,dest=dist ohc_pipeline/ohc_ingest
+#
+# Confirm it's static (expect "statically linked" / "not a dynamic executable"):
+#   file dist/ohc_ingest
+#   ldd  dist/ohc_ingest
+#
+# Deploy and run on the cluster (no container needed):
+#   scp dist/ohc_ingest cluster:~/bin/
+#   OHC_DIR_MEAN=... OHC_DIR_ENSEMBLE=... OHC_DIR_OUT=... \
+#   OHC_ETOPO=.../etopo60.cdf OHC_BASINMASK=.../basinmask_04.msk \
+#     ./ohc_ingest --tag OP20260110 --layer 15-20 --years 2016 --months 8

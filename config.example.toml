@@ -1,0 +1,21 @@
+# Static constants + paths for ohc_ingest (one per product/environment).
+# The per-run SLICE is on the command line and is required:
+#   ohc_ingest config.toml --tag OP20260110 --layer 15-20 --years 2016 --months 8
+# (one run processes exactly one layer; loop layers via your job scheduler.)
+# The run identifier comes from --tag / OHC_TAG, not this file.
+
+var_name   = "potentialTemperature"
+model_name = "SpaceTimeTrend"
+
+latitude_range_to_keep = [-64.5, 64.5]
+basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
+
+# LocalGP .mat output dirs — mean and ensemble live in separate directories.
+# Use absolute paths on the cluster (jobs may start in an unpredictable cwd).
+dir_mean       = "/path/to/mapping/.../Results/FullField"
+dir_ensemble   = "/path/to/mapping/.../Results/FullFieldLocalCondSim"
+dir_out        = "/path/to/output/ohc_zarr"
+etopo_path     = "/path/to/data/etopo60.cdf"
+basinmask_path = "/path/to/data/basinmask_04.msk"
+
+# Optional (defaults shown): cp0 = 3989.244, rho0 = 1030.0

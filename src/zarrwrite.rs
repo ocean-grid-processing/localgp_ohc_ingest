@@ -1,0 +1,219 @@
+//! Minimal zarr **v3** writer (pure Rust).
+//!
+//! A zarr store is a directory tree: each array is a directory with a `zarr.json` metadata
+//! file plus one file per chunk (`c/<i>/<j>/...`). We emit v3 with the `bytes` (little-endian)
+//! + `gzip` codecs — gzip via flate2 is pure Rust and read natively by zarr-python/xarray.
+//!
+//! Layout per layer (see ../zarr_schema.md):
+//!   ohc_mean      (time,lat,lon)         f32, 1 chunk
+//!   ohc_ensemble  (member,time,lat,lon)  f32, chunk (1,time,lat,lon) → one file per member
+//!   mask_flags    (lat,lon)              u8
+//!   etopo         (lat,lon)              f32
+//!   basin_id      (lat,lon)              i16
+//!   cell_area     (lat,lon)              f64
+//!   coords: lon, lat, time, member
+
+use anyhow::{Context, Result};
+use flate2::{write::GzEncoder, Compression};
+use ndarray::{Array2, ArrayView, Axis, Dimension};
+use serde_json::{json, Value};
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use crate::config::{RunConfig, Slice};
+use crate::ingest::LayerData;
+use crate::masks;
+use crate::GridDef;
+
+const GZIP_LEVEL: u32 = 5;
+
+/// Trait for the small set of element types we serialize, with their zarr v3 names + fill.
+trait ZElem: Copy {
+    const DTYPE: &'static str;
+    fn fill() -> Value;
+    fn to_le(self, out: &mut Vec<u8>);
+}
+impl ZElem for f32 {
+    const DTYPE: &'static str = "float32";
+    fn fill() -> Value { json!("NaN") }
+    fn to_le(self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); }
+}
+impl ZElem for f64 {
+    const DTYPE: &'static str = "float64";
+    fn fill() -> Value { json!("NaN") }
+    fn to_le(self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); }
+}
+impl ZElem for i16 {
+    const DTYPE: &'static str = "int16";
+    fn fill() -> Value { json!(0) }
+    fn to_le(self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); }
+}
+impl ZElem for u8 {
+    const DTYPE: &'static str = "uint8";
+    fn fill() -> Value { json!(0) }
+    fn to_le(self, out: &mut Vec<u8>) { out.push(self); }
+}
+
+fn gzip(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut e = GzEncoder::new(Vec::new(), Compression::new(GZIP_LEVEL));
+    e.write_all(bytes)?;
+    Ok(e.finish()?)
+}
+
+/// C-order little-endian bytes of any array view, gzip-compressed (one chunk).
+fn chunk_bytes<T: ZElem, D: Dimension>(view: &ArrayView<T, D>) -> Result<Vec<u8>> {
+    let mut raw = Vec::with_capacity(view.len() * std::mem::size_of::<T>());
+    for &x in view.iter() {
+        x.to_le(&mut raw); // .iter() is logical C order regardless of memory layout
+    }
+    gzip(&raw)
+}
+
+fn array_meta<T: ZElem>(
+    shape: &[usize],
+    chunk_shape: &[usize],
+    dim_names: &[&str],
+    attrs: Value,
+) -> Value {
+    json!({
+        "zarr_format": 3,
+        "node_type": "array",
+        "shape": shape,
+        "data_type": T::DTYPE,
+        "chunk_grid": { "name": "regular",
+                        "configuration": { "chunk_shape": chunk_shape } },
+        "chunk_key_encoding": { "name": "default",
+                                "configuration": { "separator": "/" } },
+        "fill_value": T::fill(),
+        "codecs": [
+            { "name": "bytes", "configuration": { "endian": "little" } },
+            { "name": "gzip",  "configuration": { "level": GZIP_LEVEL } }
+        ],
+        "attributes": attrs,
+        "dimension_names": dim_names,
+    })
+}
+
+fn write_json(path: &Path, v: &Value) -> Result<()> {
+    fs::write(path, serde_json::to_vec_pretty(v)?)
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+/// Write a single-chunk array (whole array in one chunk file `c/0/0/...`).
+fn write_array_single_chunk<T: ZElem, D: Dimension>(
+    root: &Path,
+    name: &str,
+    arr: &ArrayView<T, D>,
+    dim_names: &[&str],
+    attrs: Value,
+) -> Result<()> {
+    let shape: Vec<usize> = arr.shape().to_vec();
+    let dir = root.join(name);
+    fs::create_dir_all(&dir)?;
+    write_json(&dir.join("zarr.json"), &array_meta::<T>(&shape, &shape, dim_names, attrs))?;
+    // chunk key c/0/0/... (one zero per dim)
+    let mut cdir = dir.join("c");
+    for _ in 0..shape.len().saturating_sub(1) {
+        cdir = cdir.join("0");
+    }
+    fs::create_dir_all(&cdir)?;
+    let chunk_path = if shape.is_empty() { dir.join("c").join("0") } else { cdir.join("0") };
+    fs::write(&chunk_path, chunk_bytes(arr)?)?;
+    Ok(())
+}
+
+/// Write the per-layer zarr store.
+#[allow(clippy::too_many_arguments)]
+pub fn write_layer_store(
+    cfg: &RunConfig,
+    slice: &Slice,
+    grid: &GridDef,
+    data: &LayerData,
+    mask_flags: &Array2<u8>,
+    etopo: &Array2<f64>,
+    basin_id: &Array2<i16>,
+    cell_area: &Array2<f64>,
+) -> Result<PathBuf> {
+    let layer = &slice.layer;
+    let root = cfg.store_path(layer);
+    fs::create_dir_all(&root)?;
+
+    // ---- group metadata ----
+    let (time_days, (y0, m0)) = slice.time_days_since_start();
+    let group_attrs = json!({
+        "Conventions": "CF-1.10",
+        "title": format!("LocalGP ocean heat content — {}, {}-{} dbar",
+                         cfg.run_tag, layer.top, layer.bottom),
+        "source": format!("LocalGP {}; var={}; run={}", cfg.model_name, cfg.var_name, cfg.run_tag),
+        "mapped_fields_tag": cfg.run_tag,
+        "var_name": cfg.var_name,
+        "model_name": cfg.model_name,
+        "layer_top": layer.top,
+        "layer_bottom": layer.bottom,
+        "cp0": cfg.cp0,
+        "rho0": cfg.rho0,
+        "domain": "lon 20.5..379.5E, lat -89.5..89.5N, 1deg",
+    });
+    write_json(
+        &root.join("zarr.json"),
+        &json!({ "zarr_format": 3, "node_type": "group", "attributes": group_attrs }),
+    )?;
+
+    // ---- coordinates ----
+    let lon = Array2::from_shape_vec((grid.nlon(), 1), grid.lon.clone())?; // reuse 2D helper via 1D view
+    write_array_single_chunk(&root, "lon", &lon.column(0), &["lon"],
+        json!({"units":"degrees_east","standard_name":"longitude"}))?;
+    let lat = Array2::from_shape_vec((grid.nlat(), 1), grid.lat.clone())?;
+    write_array_single_chunk(&root, "lat", &lat.column(0), &["lat"],
+        json!({"units":"degrees_north","standard_name":"latitude"}))?;
+    let time = Array2::from_shape_vec((time_days.len(), 1), time_days)?;
+    write_array_single_chunk(&root, "time", &time.column(0), &["time"],
+        json!({"units": format!("days since {:04}-{:02}-15", y0, m0), "calendar":"proleptic_gregorian"}))?;
+    let member: Vec<i16> = (1..=crate::consts::NMEMBER as i16).collect();
+    let member = Array2::from_shape_vec((member.len(), 1), member)?;
+    write_array_single_chunk(&root, "member", &member.column(0), &["member"],
+        json!({"long_name":"conditional simulation member"}))?;
+
+    // ---- ancillary grids ----
+    write_array_single_chunk(&root, "etopo", &etopo.view(), &["lat","lon"],
+        json!({"units":"m","long_name":"bathymetry (relief), negative below sea level"}))?;
+    write_array_single_chunk(&root, "basin_id", &basin_id.view(), &["lat","lon"],
+        json!({"long_name":"WOA basin id (surface)"}))?;
+    write_array_single_chunk(&root, "cell_area", &cell_area.view(), &["lat","lon"],
+        json!({"units":"m2","long_name":"grid cell area"}))?;
+    write_array_single_chunk(&root, "mask_flags", &mask_flags.view(), &["lat","lon"],
+        json!({
+            "long_name":"mask flag band",
+            "flag_masks": masks::FLAG_MASKS.to_vec(),
+            "flag_meanings": masks::FLAG_MEANINGS,
+        }))?;
+
+    // ---- ohc_mean (single chunk) ----
+    write_array_single_chunk(&root, "ohc_mean", &data.ohc_mean.view(), &["time","lat","lon"],
+        json!({"units":"J/m2","long_name":"ocean heat content (posterior mean)"}))?;
+
+    // ---- ohc_ensemble: shape (member,time,lat,lon), chunk (1,time,lat,lon) per member ----
+    let (nm, nt, nlat, nlon) = data.ohc_ensemble.dim();
+    let dir = root.join("ohc_ensemble");
+    fs::create_dir_all(&dir)?;
+    write_json(
+        &dir.join("zarr.json"),
+        &array_meta::<f32>(
+            &[nm, nt, nlat, nlon],
+            &[1, nt, nlat, nlon],
+            &["member", "time", "lat", "lon"],
+            json!({"units":"J/m2","long_name":"ocean heat content (conditional simulations)"}),
+        ),
+    )?;
+    for m in 0..nm {
+        let slab = data.ohc_ensemble.index_axis(Axis(0), m); // [time,lat,lon]
+        // chunk key c/<m>/0/0/0
+        let cdir = dir.join("c").join(m.to_string()).join("0").join("0");
+        fs::create_dir_all(&cdir)?;
+        fs::write(cdir.join("0"), chunk_bytes(&slab)?)?;
+    }
+
+    Ok(root)
+}

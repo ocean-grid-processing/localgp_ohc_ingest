@@ -1,0 +1,18 @@
+# Python environment for the round-trip cross-check (scripts/verify_store.py).
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir numpy scipy xarray "zarr>=3"
+
+COPY scripts/verify_store.py /usr/local/bin/verify_store.py
+WORKDIR /work
+ENTRYPOINT ["python", "/usr/local/bin/verify_store.py"]
+
+# Build:
+#   docker image build -f Dockerfile.crosscheck -t ohc_verify ohc_pipeline/ohc_ingest
+#
+# Run (mount the store + the two .mat dirs, pass their in-container paths as the three args):
+#   docker container run --rm \
+#     -v /host/out:/out:ro \
+#     -v /host/FullField:/in_mean:ro \
+#     -v /host/FullFieldLocalCondSim:/in_ens:ro \
+#     ohc_verify /out/ohc_OP20260110_plev15_20.zarr /in_mean /in_ens

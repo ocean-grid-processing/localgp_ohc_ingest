@@ -1,0 +1,25 @@
+[package]
+name = "ohc_ingest"
+version = "0.1.0"
+edition = "2021"
+description = "Ingest LocalGP .mat output into clean OHC zarr grids + bit-band masks"
+
+[dependencies]
+ndarray = "0.16"
+flate2 = "1.0"            # zlib inflate for MAT v7 compressed elements
+rayon = "1.10"           # parallel over layers / members
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"         # hand-rolled zarr v3 metadata
+toml = "0.8"
+anyhow = "1"             # error handling
+byteorder = "1"          # explicit endian reads
+
+# NOTE: zarr v3 is written by hand (see zarrwrite.rs) using serde_json + the flate2 gzip
+# codec — pure Rust, no zarrs/Blosc C deps. Can upgrade to Blosc via `zarrs` later if needed.
+
+[dev-dependencies]
+approx = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
