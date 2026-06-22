@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Project an ohc_ingest zarr store to an ME4OH-compliant NetCDF submission.
+
+The zarr store is our source of truth (raw OHC + a bit-band mask, nothing masked out). A
+compliant submission can only say "don't use this point" via NaN, so this step collapses the
+selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days since 1900-01-01,
+and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
+
+    python publish.py STORE.zarr --experiment B --product LocalGP \
+        [--preset me4oh|wmo] [--levels LOW,HIGH] [--anomaly] [--out DIR]
+
+Mask presets (see ../../mask_spec.md):
+  me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
+                    bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
+                    field and let the assessment define the common domain.
+  wmo             = all bits (adds outside_latitude, removed_basin) — our cropped product.
+
+Requires: xarray, zarr>=3, numpy, netCDF4.
+"""
+import argparse
+import datetime
+import os
+
+import numpy as np
+import xarray as xr
+
+# mask bit values (mask_spec.md)
+BITS = {
+    "bed_above_shallow": 1,
+    "bed_above_deep": 2,
+    "outside_latitude": 4,
+    "removed_basin": 8,
+    "never_estimated": 16,
+    "incomplete_timeseries": 32,
+}
+PRESETS = {
+    "me4oh": ["never_estimated", "incomplete_timeseries", "bed_above_shallow", "bed_above_deep"],
+    "wmo": list(BITS),
+}
+TERA = 1e12
+
+
+def preset_mask_value(preset):
+    v = 0
+    for name in PRESETS[preset]:
+        v |= BITS[name]
+    return v
+
+
+def fmt_lev(x):
+    xf = float(x)
+    return str(int(xf)) if xf == int(xf) else ("%g" % xf)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("store")
+    ap.add_argument("--experiment", required=True)
+    ap.add_argument("--product", default=None, help="product name for the filename (default: run tag)")
+    ap.add_argument("--preset", default="me4oh", choices=list(PRESETS))
+    ap.add_argument("--levels", default=None, help="LOW,HIGH meters for the filename (default: store layer bounds)")
+    ap.add_argument("--anomaly", action="store_true", help="subtract the per-cell time mean before writing")
+    ap.add_argument("--out", default=".")
+    args = ap.parse_args()
+
+    ds = xr.open_zarr(args.store, consolidated=False)  # decodes time -> datetime64
+    g = ds.attrs
+    product = args.product or g["mapped_fields_tag"]
+
+    # --- collapse the selected mask bits to NaN ---
+    mval = preset_mask_value(args.preset)
+    masked = xr.DataArray((ds["mask_flags"].values.astype("uint8") & mval) != 0,
+                          dims=("lat", "lon"))
+    data = ds["ohc_mean"].where(~masked) / TERA        # [time, lat, lon], TJ/m^2
+    if args.anomaly:
+        data = data - data.mean("time")
+
+    # --- time -> days since 1900-01-01 ---
+    t = ds["time"].values                              # datetime64
+    days1900 = (t - np.datetime64("1900-01-01T00:00:00")) / np.timedelta64(1, "D")
+    years = t.astype("datetime64[Y]").astype(int) + 1970
+    y0, y1 = int(years.min()), int(years.max())
+
+    # --- layer bounds (meters) for the filename ---
+    if args.levels:
+        low, high = (s.strip() for s in args.levels.split(","))
+    else:
+        low, high = fmt_lev(g["layer_top"]), fmt_lev(g["layer_bottom"])
+
+    # --- compliant dataset: DATA(LONGITUDE, LATITUDE, TIME) ---
+    out = xr.Dataset(
+        {"DATA": (("LONGITUDE", "LATITUDE", "TIME"),
+                  data.transpose("lon", "lat", "time").values.astype("float32"))},
+        coords={
+            "LONGITUDE": ("LONGITUDE", ds["lon"].values),
+            "LATITUDE": ("LATITUDE", ds["lat"].values),
+            "TIME": ("TIME", days1900.astype("float64")),
+        },
+    )
+    out["LONGITUDE"].attrs = {"units": "degrees_east", "axis": "X"}
+    out["LATITUDE"].attrs = {"units": "degrees_north", "axis": "Y"}
+    out["TIME"].attrs = {"units": "days since 1900-01-01 00:00:00",
+                         "calendar": "proleptic_gregorian", "axis": "T"}
+    out["DATA"].attrs = {"units": "TJ/m^2", "long_name": "ocean heat content density"}
+    out.attrs = {
+        "Conventions": "CF-1.8",
+        "product": product,
+        "experiment": args.experiment,
+        "period": "%d_%d" % (y0, y1),
+        "layer_m": "%s_%s" % (low, high),
+        "source": g.get("source", ""),
+        "cp0": g["cp0"], "rho0": g["rho0"],
+        "mask_preset": args.preset,
+        "mask_applied": " ".join(PRESETS[args.preset]),
+        "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
+    path = os.path.join(args.out, fname)
+    enc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan)}}
+    out.to_netcdf(path, engine="netcdf4", format="NETCDF4", encoding=enc)
+    print("wrote", path, "(%d timesteps, preset=%s)" % (len(days1900), args.preset))
+
+
+if __name__ == "__main__":
+    main()
