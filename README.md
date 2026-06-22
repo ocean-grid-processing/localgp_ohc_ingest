@@ -112,6 +112,25 @@ OHC_BASINMASK=/path/to/data/basinmask_04.msk \
   cargo test
 ```
 
+## Publish an ME4OH submission
+
+The zarr store is the source of truth; `publish.py` projects it to a compliant `.nc` submission
+— collapsing the selected mask bits to NaN, converting J/m² → TJ/m² and the time axis to days
+since 1900-01-01, and writing `DATA(LONGITUDE, LATITUDE, TIME)` under the ME4OH filename. This
+keeps the Rust binary pure (zarr only); NetCDF emission lives here in Python.
+
+```bash
+python scripts/publish.py /path/ohc_<tag>_plev15_20.zarr \
+    --experiment B --product LocalGP --out submissions/
+# -> submissions/OHC_<Y0>_<Y1>_lev15_20_expB_LocalGP.nc
+```
+
+Mask presets: `me4oh` (default) applies only physical/validity bits (so we submit the honest,
+maximal valid field and let the assessment define the common domain); `wmo` applies all bits
+(our latitude/basin-cropped product). Use `--levels LOW,HIGH` to set the filename's layer bounds
+in meters (e.g. `--levels 0,286.6`) when the store's bounds aren't the submission bounds, and
+`--anomaly` to subtract the per-cell time mean. Requires `netCDF4` in addition to the verify deps.
+
 ## Verify a written store
 
 ```bash

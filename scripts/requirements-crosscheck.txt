@@ -1,6 +1,7 @@
-# Python deps for the round-trip cross-check (scripts/verify_store.py).
+# Python deps for the Component-A tooling: verify_store.py (cross-check) and publish.py.
 # Transitive deps (pandas, numcodecs, donfig, ...) are resolved automatically.
 numpy
-scipy
+scipy             # verify: scipy.io.loadmat (independent .mat oracle)
 xarray>=2024.10   # zarr-v3 support
 zarr>=3           # reads the v3 store + registers the xarray zarr engine
+netCDF4           # publish: writes the compliant .nc submission
