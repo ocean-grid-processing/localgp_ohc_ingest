@@ -5,10 +5,12 @@ The companion to verify_store.py, but for the END of Component A: it confirms th
 submission still equals the LocalGP .mat after the whole ingest+publish chain (mask applied,
 J/m^2 -> TJ/m^2, time re-referenced to 1900). Uses scipy.io.loadmat as an independent reader.
 
-    python verify_submission.py SUBMISSION.nc DIR_MEAN DIR_ENSEMBLE [--no-sd]
+    python verify_publish.py SUBMISSION.nc DIR_MEAN DIR_ENSEMBLE [--no-sd]
 
-DATA is checked exactly (it's a deterministic transform of the .mat). DATA_SD is checked to a
-small tolerance (it's an ensemble statistic; cross-implementation std can differ at f32 ULP).
+Both DATA and DATA_SD are checked to a small float32-scale tolerance, not bit-for-bit: the
+TJ/m^2 unit conversion (divide by 1e12) happens in float32 in the pipeline, and 1e12 isn't even
+exactly representable in float32, so a last-ULP (~1e-7 relative) difference from a float64
+recompute is expected and harmless.
 Requires: xarray, numpy, scipy, netCDF4.
 """
 import argparse
@@ -19,6 +21,7 @@ import xarray as xr
 from scipy.io import loadmat
 
 TERA = 1e12
+DATA_RTOL = 1e-6   # ~8 float32 ULP; absorbs the float32 /1e12 rounding
 SD_RTOL = 1e-3
 
 
@@ -68,9 +71,12 @@ def main():
         got = data[:, :, t]
         finite = np.isfinite(got)
         assert np.all(np.isfinite(exp[finite])), "DATA finite where .mat is NaN at %04d-%02d" % (year, month)
-        md = float(np.abs(got[finite] - exp[finite]).max()) if finite.any() else 0.0
-        assert md == 0.0, "DATA differs at %04d-%02d (max %g)" % (year, month, md)
-        worst_data = max(worst_data, md)
+        if finite.any():
+            md = float(np.abs(got[finite] - exp[finite]).max())
+            scale = float(np.abs(exp[finite]).max())
+            assert md <= DATA_RTOL * scale, \
+                "DATA differs at %04d-%02d (max %g, field scale %g)" % (year, month, md, scale)
+            worst_data = max(worst_data, md)
 
         if has_sd:
             ens_path = os.path.join(args.dir_ensemble, stem % "LocalCondSim")
