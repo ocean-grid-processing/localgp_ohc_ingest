@@ -131,6 +131,24 @@ maximal valid field and let the assessment define the common domain); `wmo` appl
 in meters (e.g. `--levels 0,286.6`) when the store's bounds aren't the submission bounds, and
 `--anomaly` to subtract the per-cell time mean. Requires `netCDF4` in addition to the verify deps.
 
+The submission also carries `DATA_SD` (ensemble 1σ, the protocol's "associated uncertainties
+where available"); `--no-uncertainty` skips it (and the full-ensemble read it requires).
+
+Two independent checks sit on the published file:
+
+```bash
+# (A) pipeline round-trip: does the published .nc still equal the upstream .mat?
+python scripts/verify_submission.py submissions/OHC_*.nc DIR_MEAN DIR_ENSEMBLE
+
+# (B-prototype) spec compliance: filename, layout, canonical grid, epoch, units
+python scripts/validate_submission.py submissions/OHC_*.nc
+```
+
+`verify_submission.py` is the end-of-Component-A round-trip (DATA checked exactly, DATA_SD to a
+small tolerance), the analogue of `verify_store.py` one stage later. `validate_submission.py`
+checks only conformance to the protocol and is the prototype of the assessment's intake
+validator (it'll move into `me4oh_assess`).
+
 ## Verify a written store
 
 ```bash

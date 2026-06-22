@@ -60,6 +60,8 @@ def main():
     ap.add_argument("--preset", default="me4oh", choices=list(PRESETS))
     ap.add_argument("--levels", default=None, help="LOW,HIGH meters for the filename (default: store layer bounds)")
     ap.add_argument("--anomaly", action="store_true", help="subtract the per-cell time mean before writing")
+    ap.add_argument("--no-uncertainty", action="store_true",
+                    help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
@@ -75,6 +77,11 @@ def main():
     if args.anomaly:
         data = data - data.mean("time")
 
+    # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
+    # ddof=1 matches the MATLAB std convention; this reads all ensemble members.
+    include_sd = not args.no_uncertainty
+    sd = (ds["ohc_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
+
     # --- time -> days since 1900-01-01 ---
     t = ds["time"].values                              # datetime64
     days1900 = (t - np.datetime64("1900-01-01T00:00:00")) / np.timedelta64(1, "D")
@@ -87,10 +94,15 @@ def main():
     else:
         low, high = fmt_lev(g["layer_top"]), fmt_lev(g["layer_bottom"])
 
-    # --- compliant dataset: DATA(LONGITUDE, LATITUDE, TIME) ---
+    # --- compliant dataset: DATA(LONGITUDE, LATITUDE, TIME) [+ optional DATA_SD] ---
+    def to_lon_lat_time(da):
+        return da.transpose("lon", "lat", "time").values.astype("float32")
+
+    data_vars = {"DATA": (("LONGITUDE", "LATITUDE", "TIME"), to_lon_lat_time(data))}
+    if include_sd:
+        data_vars["DATA_SD"] = (("LONGITUDE", "LATITUDE", "TIME"), to_lon_lat_time(sd))
     out = xr.Dataset(
-        {"DATA": (("LONGITUDE", "LATITUDE", "TIME"),
-                  data.transpose("lon", "lat", "time").values.astype("float32"))},
+        data_vars,
         coords={
             "LONGITUDE": ("LONGITUDE", ds["lon"].values),
             "LATITUDE": ("LATITUDE", ds["lat"].values),
@@ -102,6 +114,12 @@ def main():
     out["TIME"].attrs = {"units": "days since 1900-01-01 00:00:00",
                          "calendar": "proleptic_gregorian", "axis": "T"}
     out["DATA"].attrs = {"units": "TJ/m^2", "long_name": "ocean heat content density"}
+    if include_sd:
+        out["DATA_SD"].attrs = {
+            "units": "TJ/m^2",
+            "long_name": "ocean heat content density, ensemble standard deviation (1-sigma)",
+            "comment": "std across %d conditional-simulation members (ddof=1)" % ds.sizes["member"],
+        }
     out.attrs = {
         "Conventions": "CF-1.8",
         "product": product,
@@ -109,17 +127,26 @@ def main():
         "period": "%d_%d" % (y0, y1),
         "layer_m": "%s_%s" % (low, high),
         "source": g.get("source", ""),
+        "var_name": g["var_name"],
+        "model_name": g["model_name"],
+        "mapped_layer": "%d_%d" % (int(g["layer_top"]), int(g["layer_bottom"])),
         "cp0": g["cp0"], "rho0": g["rho0"],
         "mask_preset": args.preset,
         "mask_applied": " ".join(PRESETS[args.preset]),
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    if include_sd:
+        out.attrs["ensemble_size"] = int(ds.sizes["member"])
 
     fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
     path = os.path.join(args.out, fname)
-    enc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan)}}
+    chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan)}
+    enc = {"DATA": dict(chunk_enc)}
+    if include_sd:
+        enc["DATA_SD"] = dict(chunk_enc)
     out.to_netcdf(path, engine="netcdf4", format="NETCDF4", encoding=enc)
-    print("wrote", path, "(%d timesteps, preset=%s)" % (len(days1900), args.preset))
+    print("wrote", path, "(%d timesteps, preset=%s, uncertainty=%s)"
+          % (len(days1900), args.preset, include_sd))
 
 
 if __name__ == "__main__":
