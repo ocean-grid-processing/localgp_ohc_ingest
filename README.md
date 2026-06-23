@@ -154,13 +154,24 @@ config + paths on startup so a missing config is obvious.
 
 ## Test
 
-Data-backed unit tests are gated on env vars (skipped if unset), with ground-truth locked from
-a single sample month/layer:
+Unit tests carry ground-truth locked from one sample month/layer. The data-backed ones are
+gated on three env vars and skip silently if unset:
+
+- `OHC_ETOPO`, `OHC_BASINMASK` — parameter grids in `data/` (come along when the crate is mounted).
+- `OHC_TEST_DATA` — a directory holding **both** sample `.mat` in one place: the FullField mean
+  (`potentialTemperatureFullFieldSpaceTimeTrend_15_20_08_2016.mat`) and its LocalCondSim
+  ensemble.
+
+Containerized run from the root of this repo (no custom image needed — the official `rust` image has the toolchain):
 
 ```bash
-OHC_TEST_DATA=/dir/with/sample/mat/files \
-OHC_ETOPO=/path/etopo60.cdf \
-OHC_BASINMASK=/path/basinmask_04.msk \
+docker container run --rm \
+  -v "$PWD":/app -w /app \
+  -v "$PWD/test_fixtures":/fixtures:ro \
+  -e OHC_TEST_DATA=/fixtures \
+  -e OHC_ETOPO=/app/data/etopo60.cdf \
+  -e OHC_BASINMASK=/app/data/basinmask_04.msk \
+  rust:1-bookworm \
   cargo test
 ```
 
