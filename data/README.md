@@ -1,6 +1,6 @@
 # Input data provenance
 
-Two small reference grids are committed here so a run is self-contained. Both are third-party
+Two small reference grids are used by ohc_ingest. Both are third-party
 upstream datasets; this records where they came from.
 
 ## etopo60.cdf — 1° global relief (bathymetry)
@@ -12,9 +12,8 @@ upstream datasets; this records where they came from.
   `NOAA-PMEL/FerretDatasets` repository (also installed by the conda `ferret_datasets` package).
   - https://github.com/NOAA-PMEL/FerretDatasets — `data/etopo60.cdf`
   - raw: https://raw.githubusercontent.com/NOAA-PMEL/FerretDatasets/master/data/etopo60.cdf
-- **This copy:** 264,088 bytes; git blob SHA-1 `377d1986df45517751b1d8d5c9e01f4514a8987d`,
+- **This copy:** git blob SHA-1 `377d1986df45517751b1d8d5c9e01f4514a8987d`,
   byte-identical to the repository copy (`git hash-object etopo60.cdf` to confirm).
-- **Lineage:** derived from NOAA NGDC ETOPO5 (5-arc-minute relief) resampled to 1°.
 - **Why this grid:** its lon/lat axes are identical to the mapping grid (20.5…379.5,
   −89.5…89.5), so no regridding is needed — `ncread.rs` asserts the match rather than
   interpolating.

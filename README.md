@@ -110,9 +110,9 @@ file dist/ohc_ingest          # → statically linked
 scp dist/ohc_ingest cluster:~/bin/
 ```
 
-## Example jobs (SLURM)
+## Example jobs (Slurm)
 
-The four pipeline steps each have a complete, runnable SLURM script in this directory — use them
+The four pipeline steps each have a complete, runnable Slurm script in this directory — use them
 as the canonical run examples (edit the paths and `--mail-user` for your setup):
 
 | step | does | script | example job |
