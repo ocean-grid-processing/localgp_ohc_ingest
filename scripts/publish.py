@@ -9,7 +9,7 @@ and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
     python publish.py STORE.zarr --experiment B --product LocalGP \
         [--preset me4oh|wmo] [--levels LOW,HIGH] [--anomaly] [--out DIR]
 
-Mask presets (see ../../mask_spec.md):
+Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.
@@ -78,7 +78,7 @@ def main():
         data = data - data.mean("time")
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
-    # ddof=1 matches the MATLAB std convention; this reads all ensemble members.
+    # ddof=1 (sample standard deviation); this reads all ensemble members.
     include_sd = not args.no_uncertainty
     sd = (ds["ohc_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
 
