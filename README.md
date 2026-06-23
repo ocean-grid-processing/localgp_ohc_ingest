@@ -57,8 +57,7 @@ cross-group assessment — all of which live in the Python consumer / `me4oh_ass
 | `etopo60.cdf` | 1° bathymetry (classic NetCDF); vars `ETOPO60X`/`ETOPO60Y`/`ROSE`; its grid is identical to the mapping grid (asserted, not regridded). Reproduced in this repo under `data/` |
 | [`basinmask_04.msk`](https://www.ncei.noaa.gov/data/oceans/woa/WOA18/MASKS/basinmask_04.msk) | WOA 0.25° basin table; nearest-neighbour to the 1° grid, surface column. |
 
-`etopo60.cdf` and `basinmask_04.msk` are committed under [`data/`](data/); full provenance,
-versions, and citations are in [`data/README.md`](data/README.md).
+Full provenance, versions, and citations are in [`data/README.md`](data/README.md).
 
 ## Output (the zarr store)
 
@@ -111,6 +110,20 @@ file dist/ohc_ingest          # → statically linked
 scp dist/ohc_ingest cluster:~/bin/
 ```
 
+## Example jobs (SLURM)
+
+The four pipeline steps each have a complete, runnable SLURM script in this directory — use them
+as the canonical run examples (edit the paths and `--mail-user` for your setup):
+
+| step | does | script | example job |
+|---|---|---|---|
+| create store | LocalGP `.mat` → zarr | `dist/ohc_ingest` | [`ohc_ingest.slurm`](ohc_ingest.slurm) |
+| validate store | zarr ↔ `.mat` | `scripts/verify_store.py` | [`verify_store.slurm`](verify_store.slurm) |
+| create submission | zarr → ME4OH `.nc` | `scripts/publish.py` | [`publish.slurm`](publish.slurm) |
+| validate submission | `.nc` ↔ `.mat` | `scripts/verify_publish.py` | [`verify_publish.slurm`](verify_publish.slurm) |
+
+The sections below explain each step's options; the `.slurm` files show a full invocation.
+
 ## Run
 
 **One run processes exactly one layer.** The per-run slice is required; static constants +
@@ -119,14 +132,12 @@ one invocation per layer (e.g. a scheduler job array) — there is deliberately 
 mode, since each layer is an independent store.
 
 ```bash
-# from a config file (see config.example.toml), full record of one layer:
 ./ohc_ingest config.toml --tag OP20260110 --layer 0-286.6 --years 2004:2025 --months 1:12
-
-# or with paths from env instead of a config file:
-OHC_DIR_MEAN=... OHC_DIR_ENSEMBLE=... OHC_DIR_OUT=... \
-OHC_ETOPO=.../etopo60.cdf OHC_BASINMASK=.../basinmask_04.msk \
-  ./ohc_ingest --tag OP20260110 --layer 0-286.6 --years 2016 --months 8
 ```
+
+Paths come from `config.toml` (positional) or the `OHC_DIR_MEAN` / `OHC_DIR_ENSEMBLE` /
+`OHC_DIR_OUT` / `OHC_ETOPO` / `OHC_BASINMASK` env vars. Complete cluster job:
+[`ohc_ingest.slurm`](ohc_ingest.slurm).
 
 Note: when run from a scheduler, pass `config.toml` explicitly and use **absolute paths**
 (inside it too) — a job's working directory is not guaranteed. The binary prints the resolved
@@ -170,10 +181,11 @@ under the ME4OH filename. It also adds `DATA_SD` (ensemble 1σ — the protocol'
 uncertainties, where available"); `--no-uncertainty` skips it (and the full-ensemble read).
 
 ```bash
-python scripts/publish.py /path/ohc_<tag>_plev0_286.6.zarr \
-    --experiment B --product LocalGP --out submissions/
-# -> submissions/OHC_<Y0>_<Y1>_lev0_286.6_expB_LocalGP.nc
+python scripts/publish.py STORE.zarr --experiment B --product LocalGP --out submissions/
+# -> submissions/OHC_<Y0>_<Y1>_lev<low>_<high>_exp<X>_<product>.nc
 ```
+
+Complete cluster job: [`publish.slurm`](publish.slurm).
 
 Mask presets: `me4oh` (default) applies only physical/validity bits, so we submit the honest,
 maximal valid field and let the assessment define the common domain; `wmo` applies all bits
@@ -189,6 +201,9 @@ python scripts/verify_store.py   STORE.zarr        DIR_MEAN DIR_ENSEMBLE
 # the published .nc vs the upstream .mat (end-to-end pipeline):
 python scripts/verify_publish.py SUBMISSION.nc     DIR_MEAN DIR_ENSEMBLE
 ```
+
+Complete cluster jobs: [`verify_store.slurm`](verify_store.slurm) and
+[`verify_publish.slurm`](verify_publish.slurm).
 
 Both use `scipy.io.loadmat` as an independent reader (not our Rust parser), so they're genuine
 oracles. Comparisons hold to a small float32-scale tolerance, not bit-for-bit: the TJ/m²
@@ -212,6 +227,8 @@ ohc_ingest/
 ├── src/                 Rust core: .mat + etopo + basinmask readers, masks, ingest, zarr writer
 ├── scripts/             Python edge: publish.py, verify_store.py, verify_publish.py
 ├── config.example.toml  constants + paths template
+├── *.slurm              example SLURM jobs, one per pipeline step
+├── data/                committed reference grids (etopo60.cdf, basinmask_04.msk) + provenance
 ├── Dockerfile           runtime container
 ├── Dockerfile.static    static musl binary for the cluster
 └── Dockerfile.crosscheck  pinned env for the verify scripts
