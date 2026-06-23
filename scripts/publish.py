@@ -9,7 +9,7 @@ and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
     python publish.py STORE.zarr --experiment B --product LocalGP \
         [--preset me4oh|wmo] [--levels LOW,HIGH] [--anomaly] [--out DIR]
 
-Mask presets (see ../../mask_spec.md):
+Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.

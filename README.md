@@ -1,7 +1,6 @@
 # ohc_ingest
 
-`ohc_ingest` turns our LocalGP ocean-heat-content (OHC) mapping output into a clean, analysis-
-ready store, and then into an ME4OH-protocol submission. It produces our group's contribution to
+`ohc_ingest` turns LocalGP ocean-heat-content (OHC) mapping output into a clean, analysis-ready store, and then into an ME4OH-protocol submission. It produces our group's contribution to
 the MapEval4OceanHeat (ME4OH) mapping-method intercomparison; the cross-group assessment that
 ingests every group's submission is a separate tool (`me4oh_assess`).
 
@@ -19,12 +18,11 @@ already available.
 
 ## How this reflects the ME4OH protocol
 
-The submission format is defined by the ME4OH protocol
-(`MapEval4OceanHeat_protocol_Giglio_etal2023.pdf`). The numbers baked into this code come from
+The submission format is defined by the [ME4OH protocol](https://zenodo.org/records/10291852). The numbers baked into this code come from
 there:
 
 - **Grid:** 1×1°, `lon 20.5…379.5`, `lat −89.5…89.5` — the protocol mandates this so no
-  regridding is needed for the intercomparison. (Conveniently it's also LocalGP's native grid.)
+  regridding is needed for the intercomparison.
 - **Units:** OHC density in TJ/m², with `cp0 = 3989.244 J/kg/K`, `rho0 = 1030 kg/m³`.
 - **Time:** monthly, days since 1900-01-01.
 - **Submission file:** one NetCDF per layer, `DATA(LONGITUDE, LATITUDE, TIME)`, named
@@ -56,8 +54,11 @@ cross-group assessment — all of which live in the Python consumer / `me4oh_ass
 | input | notes |
 |---|---|
 | LocalGP `.mat` | MATLAB v7 (zlib-compressed); variable `fullFieldGrid`, `[lon,lat]` for the mean and `[lon,lat,100]` for the ensemble. Mean and ensemble live in **separate directories**. |
-| `etopo60.cdf` | 1° bathymetry (classic NetCDF); vars `ETOPO60X`/`ETOPO60Y`/`ROSE`; its grid is identical to the mapping grid (asserted, not regridded). |
-| `basinmask_04.msk` | WOA 0.25° basin table; nearest-neighbour to the 1° grid, surface column. |
+| `etopo60.cdf` | 1° bathymetry (classic NetCDF); vars `ETOPO60X`/`ETOPO60Y`/`ROSE`; its grid is identical to the mapping grid (asserted, not regridded). Reproduced in this repo under `data/` |
+| [`basinmask_04.msk`](https://www.ncei.noaa.gov/data/oceans/woa/WOA18/MASKS/basinmask_04.msk) | WOA 0.25° basin table; nearest-neighbour to the 1° grid, surface column. |
+
+`etopo60.cdf` and `basinmask_04.msk` are committed under [`data/`](data/); full provenance,
+versions, and citations are in [`data/README.md`](data/README.md).
 
 ## Output (the zarr store)
 
@@ -67,11 +68,11 @@ cross-group assessment — all of which live in the Python consumer / `me4oh_ass
 - `ohc_ensemble` `(member, time, lat, lon)` — the 100 conditional simulations, chunked one
   file per member.
 - `mask_flags` `(lat, lon)` — the bit band, with CF `flag_masks`/`flag_meanings` (see
-  [`../mask_spec.md`](../mask_spec.md)).
+  [`mask_spec.md`](mask_spec.md)).
 - `etopo`, `basin_id`, `cell_area` `(lat, lon)` — ancillaries.
 
 zarr v3, `bytes`+`gzip` codecs (pure Rust), xarray-readable. Layout details in
-[`../zarr_schema.md`](../zarr_schema.md).
+[`zarr_schema.md`](zarr_schema.md).
 
 ## The mask bit band
 
@@ -90,7 +91,7 @@ to NaN in `publish.py`). The bits:
 
 Bits 0/1/4/5 are physical/validity reasons; bits 2/3 are policy reasons — `publish.py`'s presets
 use exactly that split. Full definitions, the selector conventions, and the monotonic-bathymetry
-sentinel are in [`../mask_spec.md`](../mask_spec.md).
+sentinel are in [`mask_spec.md`](mask_spec.md).
 
 ## Build
 
@@ -216,5 +217,5 @@ ohc_ingest/
 └── Dockerfile.crosscheck  pinned env for the verify scripts
 ```
 
-Design notes: [`../mask_spec.md`](../mask_spec.md) (the mask bit band) and
-[`../zarr_schema.md`](../zarr_schema.md) (store layout).
+Design notes: [`mask_spec.md`](mask_spec.md) (the mask bit band) and
+[`zarr_schema.md`](zarr_schema.md) (store layout).

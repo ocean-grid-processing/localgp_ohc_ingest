@@ -6,7 +6,7 @@
 //! Combined layers, anomalies, integrals, trends, plotting and consumer exports are out
 //! of scope and handled by a downstream Python stage.
 //!
-//! See ../mask_spec.md, ../zarr_schema.md, ../implementation_plan.md.
+//! See ../mask_spec.md and ../zarr_schema.md.
 
 pub mod config;
 pub mod matread;
