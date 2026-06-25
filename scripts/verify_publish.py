@@ -58,6 +58,11 @@ def main():
     args = ap.parse_args()
 
     ds = xr.open_dataset(args.submission, decode_times=False)
+    if ds["DATA"].ndim != 3:
+        raise SystemExit(
+            "error: %s has %d-D DATA, expected the 3-D OHC_ submission. Pass the OHC_ submission "
+            "file, not the OHCENS_ ensemble file; --ensemble finds the OHCENS_ sibling itself."
+            % (os.path.basename(args.submission), ds["DATA"].ndim))
     a = ds.attrs
     cp0, rho0 = a["cp0"], a["rho0"]
     var, model, layer = a["var_name"], a["model_name"], a["mapped_layer"]
@@ -68,9 +73,18 @@ def main():
 
     data_ens = None
     if args.ensemble:
-        ens_nc = os.path.join(os.path.dirname(args.submission),
-                              os.path.basename(args.submission).replace("OHC_", "OHCENS_", 1))
-        data_ens = xr.open_dataset(ens_nc, decode_times=False)["DATA"].values  # [MEMBER,LON,LAT,TIME]
+        base = os.path.basename(args.submission)
+        if not base.startswith("OHC_"):
+            raise SystemExit("error: cannot derive the OHCENS_ name from %r (expected an OHC_ submission)" % base)
+        ens_nc = os.path.join(os.path.dirname(args.submission), "OHCENS_" + base[len("OHC_"):])
+        if not os.path.exists(ens_nc):
+            raise SystemExit("error: --ensemble given but %s not found "
+                             "(run publish.py --ensemble first)" % os.path.basename(ens_nc))
+        eda = xr.open_dataset(ens_nc, decode_times=False)["DATA"]
+        if eda.ndim != 4:
+            raise SystemExit("error: %s DATA is %d-D, expected 4-D (MEMBER,LON,LAT,TIME)"
+                             % (os.path.basename(ens_nc), eda.ndim))
+        data_ens = eda.values   # [MEMBER, LON, LAT, TIME]
 
     days = np.round(ds["TIME"].values).astype("timedelta64[D]")
     dates = np.datetime64("1900-01-01") + days
