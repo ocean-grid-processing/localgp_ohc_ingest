@@ -203,6 +203,12 @@ maximal valid field and let the assessment define the common domain; `wmo` appli
 (our latitude/basin-cropped product). `--levels LOW,HIGH` sets the filename's layer bounds in
 meters when they differ from the store's; `--anomaly` subtracts the per-cell time mean.
 
+`--ensemble` additionally writes the full ensemble as a sibling `OHCENS_<...>.nc` with
+`DATA(MEMBER, LONGITUDE, LATITUDE, TIME)` — same mask, units, and time axis as the submission —
+for downstream uses that derive per-member quantities before collapsing to a spread. It is not
+an ME4OH submission (distinct filename, extra dimension), so it won't be picked up by the
+assessment's `OHC_*.nc` discovery.
+
 ### Verification (two independent round-trips against the `.mat`)
 
 ```bash
@@ -212,6 +218,9 @@ python scripts/verify_store.py   STORE.zarr        DIR_MEAN DIR_ENSEMBLE
 # the published .nc vs the upstream .mat (end-to-end pipeline):
 python scripts/verify_publish.py SUBMISSION.nc     DIR_MEAN DIR_ENSEMBLE
 ```
+
+Add `--ensemble` to `verify_publish.py` to also check the sibling `OHCENS_<...>.nc` (from
+`publish.py --ensemble`) member-by-member against the `.mat` ensemble.
 
 Complete cluster jobs: [`verify_store.slurm`](verify_store.slurm) and
 [`verify_publish.slurm`](verify_publish.slurm).

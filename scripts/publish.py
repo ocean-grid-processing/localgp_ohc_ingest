@@ -7,13 +7,18 @@ selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days si
 and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
 
     python publish.py STORE.zarr --experiment B --product LocalGP \
-        [--preset me4oh|wmo] [--levels LOW,HIGH] [--anomaly] [--out DIR]
+        [--preset me4oh|wmo] [--levels LOW,HIGH] [--anomaly] [--ensemble] [--out DIR]
 
 Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.
   wmo             = all bits (adds outside_latitude, removed_basin) — our cropped product.
+
+--ensemble additionally writes the full conditional-simulation ensemble as a sibling file
+  OHCENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
+  axis — for downstream uses that derive per-member quantities before collapsing to a spread.
+  It is NOT an ME4OH submission (different filename, extra dimension). Reads all members.
 
 Requires: xarray, zarr>=3, numpy, netCDF4.
 """
@@ -62,6 +67,8 @@ def main():
     ap.add_argument("--anomaly", action="store_true", help="subtract the per-cell time mean before writing")
     ap.add_argument("--no-uncertainty", action="store_true",
                     help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
+    ap.add_argument("--ensemble", action="store_true",
+                    help="also write the full ensemble as OHCENS_<...>.nc, DATA(MEMBER,LON,LAT,TIME)")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
@@ -147,6 +154,37 @@ def main():
     out.to_netcdf(path, engine="netcdf4", format="NETCDF4", encoding=enc)
     print("wrote", path, "(%d timesteps, preset=%s, uncertainty=%s)"
           % (len(days1900), args.preset, include_sd))
+
+    # --- optional: the full ensemble as a member-dimensioned sibling file ---
+    if args.ensemble:
+        ens = (ds["ohc_ensemble"].where(~masked) / TERA).astype("float32")
+        ens = ens.transpose("member", "lon", "lat", "time").rename(
+            {"member": "MEMBER", "lon": "LONGITUDE", "lat": "LATITUDE", "time": "TIME"})
+        ens = ens.assign_coords(MEMBER=ds["member"].values,
+                                LONGITUDE=ds["lon"].values,
+                                LATITUDE=ds["lat"].values,
+                                TIME=days1900.astype("float64"))
+        eds = ens.to_dataset(name="DATA")
+        eds["LONGITUDE"].attrs = {"units": "degrees_east", "axis": "X"}
+        eds["LATITUDE"].attrs = {"units": "degrees_north", "axis": "Y"}
+        eds["TIME"].attrs = {"units": "days since 1900-01-01 00:00:00",
+                             "calendar": "proleptic_gregorian", "axis": "T"}
+        eds["MEMBER"].attrs = {"long_name": "conditional-simulation member"}
+        eds["DATA"].attrs = {"units": "TJ/m^2",
+                             "long_name": "ocean heat content density (per ensemble member)"}
+        eds.attrs = dict(out.attrs)
+        eds.attrs["ensemble_size"] = int(ds.sizes["member"])
+        eds.attrs["note"] = ("full conditional-simulation ensemble for per-member downstream "
+                             "analysis; NOT a single-field ME4OH submission")
+
+        ename = "OHCENS_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
+        epath = os.path.join(args.out, ename)
+        nlon, nlat, ntime = len(ds["lon"]), len(ds["lat"]), len(days1900)
+        eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan),
+                         "chunksizes": (1, nlon, nlat, ntime)}}
+        eds.to_netcdf(epath, engine="netcdf4", format="NETCDF4", encoding=eenc)
+        print("wrote", epath, "(ensemble: %d members, preset=%s)"
+              % (ds.sizes["member"], args.preset))
 
 
 if __name__ == "__main__":
