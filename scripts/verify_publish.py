@@ -5,12 +5,16 @@ The companion to verify_store.py, but one stage later: it confirms the published
 still equals the LocalGP .mat after the whole ingest+publish chain (mask applied,
 J/m^2 -> TJ/m^2, time re-referenced to 1900). Uses scipy.io.loadmat as an independent reader.
 
-    python verify_publish.py SUBMISSION.nc DIR_MEAN DIR_ENSEMBLE [--no-sd]
+    python verify_publish.py SUBMISSION.nc DIR_MEAN DIR_ENSEMBLE [--no-sd] [--ensemble]
 
-Both DATA and DATA_SD are checked to a small float32-scale tolerance, not bit-for-bit: the
-TJ/m^2 unit conversion (divide by 1e12) happens in float32 in the pipeline, and 1e12 isn't even
-exactly representable in float32, so a last-ULP (~1e-7 relative) difference from a float64
-recompute is expected and harmless.
+`--ensemble` also checks the sibling `OHCENS_<...>.nc` (the full per-member ensemble written by
+`publish.py --ensemble`, located by swapping the `OHC_` filename prefix) member-by-member
+against the `.mat` ensemble.
+
+Checks hold to a small float32-scale tolerance, not bit-for-bit: the TJ/m^2 unit conversion
+(divide by 1e12) happens in float32 in the pipeline, and 1e12 isn't even exactly representable
+in float32, so a last-ULP (~1e-7 relative) difference from a float64 recompute is expected and
+harmless.
 Requires: xarray, numpy, scipy, netCDF4.
 """
 import argparse
@@ -37,12 +41,20 @@ def expected_sd(ens_lonlatmember, cp0, rho0):
     return np.float32(sd.astype(np.float64) / TERA)
 
 
+def expected_ens(ens_lonlatmember, cp0, rho0):
+    """Per-member published value: same cast chain as expected_data, kept 3-D."""
+    s = np.float32(ens_lonlatmember * cp0 * rho0)      # [lon, lat, member] f32
+    return np.float32(s.astype(np.float64) / TERA)     # [lon, lat, member] TJ/m^2
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("submission")
     ap.add_argument("dir_mean")
     ap.add_argument("dir_ensemble")
     ap.add_argument("--no-sd", action="store_true", help="skip the DATA_SD check")
+    ap.add_argument("--ensemble", action="store_true",
+                    help="also check the sibling OHCENS_<...>.nc ensemble file member-by-member")
     args = ap.parse_args()
 
     ds = xr.open_dataset(args.submission, decode_times=False)
@@ -53,14 +65,22 @@ def main():
 
     data = ds["DATA"].values                            # [lon, lat, time], TJ/m^2
     data_sd = ds["DATA_SD"].values if has_sd else None
+
+    data_ens = None
+    if args.ensemble:
+        ens_nc = os.path.join(os.path.dirname(args.submission),
+                              os.path.basename(args.submission).replace("OHC_", "OHCENS_", 1))
+        data_ens = xr.open_dataset(ens_nc, decode_times=False)["DATA"].values  # [MEMBER,LON,LAT,TIME]
+
     days = np.round(ds["TIME"].values).astype("timedelta64[D]")
     dates = np.datetime64("1900-01-01") + days
     nt = len(dates)
-    print("checking %s — %d timesteps, layer %s, uncertainty=%s"
-          % (a.get("product"), nt, layer, has_sd))
+    print("checking %s — %d timesteps, layer %s, uncertainty=%s, ensemble=%s"
+          % (a.get("product"), nt, layer, has_sd, args.ensemble))
 
     worst_data = 0.0
     worst_sd = 0.0
+    worst_ens = 0.0
     for t in range(nt):
         year = int(dates[t].astype("datetime64[Y]").astype(int) + 1970)
         month = int(dates[t].astype("datetime64[M]").astype(int) % 12 + 1)
@@ -78,15 +98,27 @@ def main():
                 "DATA differs at %04d-%02d (max %g, field scale %g)" % (year, month, md, scale)
             worst_data = max(worst_data, md)
 
-        if has_sd:
+        if has_sd or args.ensemble:
             ens_path = os.path.join(args.dir_ensemble, stem % "LocalCondSim")
-            exp_s = expected_sd(loadmat(ens_path)["fullFieldGrid"], cp0, rho0)
-            got_s = data_sd[:, :, t]
-            finite = np.isfinite(got_s)
-            rel = np.abs(got_s[finite] - exp_s[finite]) / (np.abs(exp_s[finite]) + 1e-30)
-            mr = float(rel.max()) if finite.any() else 0.0
-            assert mr < SD_RTOL, "DATA_SD differs at %04d-%02d (max rel %g)" % (year, month, mr)
-            worst_sd = max(worst_sd, mr)
+            ens_mat = loadmat(ens_path)["fullFieldGrid"]    # [lon, lat, member]
+            if has_sd:
+                exp_s = expected_sd(ens_mat, cp0, rho0)
+                got_s = data_sd[:, :, t]
+                finite = np.isfinite(got_s)
+                rel = np.abs(got_s[finite] - exp_s[finite]) / (np.abs(exp_s[finite]) + 1e-30)
+                mr = float(rel.max()) if finite.any() else 0.0
+                assert mr < SD_RTOL, "DATA_SD differs at %04d-%02d (max rel %g)" % (year, month, mr)
+                worst_sd = max(worst_sd, mr)
+            if args.ensemble:
+                exp_e = np.transpose(expected_ens(ens_mat, cp0, rho0), (2, 0, 1))  # [member,lon,lat]
+                got_e = data_ens[:, :, :, t]                                       # [MEMBER,LON,LAT]
+                finite = np.isfinite(got_e)
+                if finite.any():
+                    me = float(np.abs(got_e[finite] - exp_e[finite]).max())
+                    scale = float(np.abs(exp_e[finite]).max())
+                    assert me <= DATA_RTOL * scale, \
+                        "OHCENS differs at %04d-%02d (max %g, field scale %g)" % (year, month, me, scale)
+                    worst_ens = max(worst_ens, me)
 
         if (t + 1) % 24 == 0 or t == nt - 1:
             print("  checked %d/%d (through %04d-%02d)" % (t + 1, nt, year, month))
@@ -94,6 +126,8 @@ def main():
     msg = "PASS — %d timesteps; DATA max diff=%g" % (nt, worst_data)
     if has_sd:
         msg += ", DATA_SD max rel diff=%g" % worst_sd
+    if args.ensemble:
+        msg += ", OHCENS max diff=%g" % worst_ens
     print(msg)
 
 
