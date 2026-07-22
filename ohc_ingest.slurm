@@ -14,4 +14,8 @@
 module purge
 
 cd $SLURM_SUBMIT_DIR
-./dist/ohc_ingest config.toml --years 2004:2025 --months 1:12 --layer 15-20 --tag localgp_dev
+./dist/ohc_ingest config.toml \
+  --dir_mean /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/Results/FullField \
+  --dir_ensemble /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/Results/FullFieldLocalCondSim \
+  --dir_out /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/ohc_ingest \
+  --years 2004:2025 --months 1:12 --layer ${1} --tag OP20260112b_repro --no-ensemble
