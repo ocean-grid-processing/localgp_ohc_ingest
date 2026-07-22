@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00
-#SBATCH --job-name=publish_for_me4oh
+#SBATCH --job-name=publish_for_ohc
 #SBATCH --output=%x.%j.out
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=katie.mills@colorado.edu
@@ -16,4 +16,6 @@ module load anaconda/2023.09
 conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
-python scripts/publish.py /scratch/alpine/wimi7695/me4oh/postprocessing/outputs/OP20260507/15_20/ohc_localgp_dev_plev15_20.zarr --experiment C --product LocalGP --preset me4oh  --out /scratch/alpine/wimi7695/me4oh/postprocessing/outputs/OP20260507/15_20/
+python scripts/publish.py \
+  /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/ohc_ingest/ohc_OP20260112b_repro_plev${1}.zarr \
+  --experiment C --product LocalGP --preset wmo --out /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/ohc_ingest
