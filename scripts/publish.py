@@ -41,15 +41,18 @@ BITS = {
     "never_estimated": 16,
     "incomplete_timeseries": 32,
     "bed_above_floor": 64,
+    "ensemble_incomplete": 128,
 }
 PRESETS = {
     "me4oh": ["never_estimated", "incomplete_timeseries", "bed_above_shallow", "bed_above_deep"],
     # WMO/GCOS domain: matches the original, which uses ONLY the uniform bathy floor (not the
     # per-layer bed_above_* bits). Keeping the per-layer bed cuts would drop partial-depth
     # continental-slope cells that the original retains (they contribute to the deep layers), so
-    # bed_above_shallow/bed_above_deep are deliberately excluded here.
+    # bed_above_shallow/bed_above_deep are deliberately excluded here. `ensemble_incomplete`
+    # reproduces the original's mean∪members mask (drops cells some CondSim member NaNs); it is
+    # unset when the store was ingested --no-ensemble, so mean-only stays mean-only.
     "wmo": ["never_estimated", "incomplete_timeseries", "outside_latitude",
-            "removed_basin", "bed_above_floor"],
+            "removed_basin", "bed_above_floor", "ensemble_incomplete"],
 }
 TERA = 1e12
 

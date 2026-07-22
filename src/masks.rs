@@ -1,11 +1,11 @@
 //! The `mask_flags` bit band (see ../mask_spec.md).
 //!
-//! One `u8` per `[lat, lon]` cell per layer, time-invariant. Seven bits; all masking policy is
+//! One `u8` per `[lat, lon]` cell per layer, time-invariant. Eight bits; all masking policy is
 //! applied lazily downstream by bitwise selection. Data is never destroyed; per-timestep
 //! validity is `isfinite(data)` and not stored here.
 
 use anyhow::{bail, Result};
-use ndarray::{Array2, Array3};
+use ndarray::{Array2, Array3, Array4};
 
 use crate::config::LayerSpec;
 use crate::GridDef;
@@ -17,11 +17,12 @@ pub const REMOVED_BASIN: u8 = 1 << 3;
 pub const NEVER_ESTIMATED: u8 = 1 << 4; // LocalGP gave no value in any month
 pub const INCOMPLETE_TIMESERIES: u8 = 1 << 5; // valid some months, not all
 pub const BED_ABOVE_FLOOR: u8 = 1 << 6; // seabed shallower than a fixed floor depth, uniform across layers (policy)
+pub const ENSEMBLE_INCOMPLETE: u8 = 1 << 7; // some CondSim member is NaN-in-time here (mean may be fine)
 
 /// CF `flag_masks` values, aligned with `FLAG_MEANINGS`.
-pub const FLAG_MASKS: [u8; 7] = [1, 2, 4, 8, 16, 32, 64];
+pub const FLAG_MASKS: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 pub const FLAG_MEANINGS: &str =
-    "bed_above_shallow bed_above_deep outside_latitude removed_basin never_estimated incomplete_timeseries bed_above_floor";
+    "bed_above_shallow bed_above_deep outside_latitude removed_basin never_estimated incomplete_timeseries bed_above_floor ensemble_incomplete";
 
 /// "Fully usable" selector: no flags set.
 pub const USABLE: u8 = BED_ABOVE_SHALLOW
@@ -30,7 +31,8 @@ pub const USABLE: u8 = BED_ABOVE_SHALLOW
     | REMOVED_BASIN
     | NEVER_ESTIMATED
     | INCOMPLETE_TIMESERIES
-    | BED_ABOVE_FLOOR;
+    | BED_ABOVE_FLOOR
+    | ENSEMBLE_INCOMPLETE;
 
 /// Temporal-validity summaries derived from the FullField mean stack `[time, lat, lon]`.
 /// `never_estimated`: NaN at every timestep. `incomplete`: NaN at some but not all.
@@ -51,6 +53,25 @@ pub fn compute_validity(mean_stack: &Array3<f64>) -> (Array2<bool>, Array2<bool>
     (never, incomplete)
 }
 
+/// Union of member NaN footprints for the `ensemble_incomplete` bit `[lat, lon]`.
+///
+/// True where **any** CondSim member is NaN at **any** timestep — i.e. the member contribution to
+/// the original's mean∪members mask (`msk |= isnan(sum(member,3))` over all members). The mean's
+/// own NaNs are already carried by `never`/`incomplete`; this adds the cells that only some
+/// members drop (the flaky deep layers). `None` in `build_flags` when ingested `--no-ensemble`.
+pub fn compute_ensemble_incomplete(ensemble: &Array4<f32>) -> Array2<bool> {
+    let (nm, _nt, nlat, nlon) = ensemble.dim();
+    let mut inc = Array2::<bool>::from_elem((nlat, nlon), false);
+    for m in 0..nm {
+        for (idx, &v) in ensemble.index_axis(ndarray::Axis(0), m).indexed_iter() {
+            if v.is_nan() {
+                inc[[idx.1, idx.2]] = true; // idx = (t, lat, lon)
+            }
+        }
+    }
+    inc
+}
+
 /// Build the flag band for one layer.
 ///
 /// `etopo` and `basin_id` are `[lat, lon]`; `basin_id` is optional (skip bit 3 if absent).
@@ -60,6 +81,10 @@ pub fn compute_validity(mean_stack: &Array3<f64>) -> (Array2<bool>, Array2<bool>
 /// `bathy_floor_m` (optional) sets `bed_above_floor` where the seabed is shallower than a fixed
 /// floor depth, applied uniformly to every layer regardless of its own bounds. `None` = no floor
 /// (the per-layer bed bits alone). Used by the WMO/GCOS product (floor = 300 m).
+///
+/// `ens_incomplete` (optional, from [`compute_ensemble_incomplete`]) sets `ensemble_incomplete`
+/// where some CondSim member is NaN-in-time — the member half of the original's mean∪members
+/// mask. `None` when ingested `--no-ensemble` (mean-only: the bit stays unset).
 #[allow(clippy::too_many_arguments)]
 pub fn build_flags(
     grid: &GridDef,
@@ -71,11 +96,17 @@ pub fn build_flags(
     bathy_floor_m: Option<f64>,
     never: &Array2<bool>,
     incomplete: &Array2<bool>,
+    ens_incomplete: Option<&Array2<bool>>,
 ) -> Result<Array2<u8>> {
     let (nlat, nlon) = (grid.nlat(), grid.nlon());
     for (label, a) in [("etopo", etopo.dim()), ("never", never.dim()), ("incomplete", incomplete.dim())] {
         if a != (nlat, nlon) {
             bail!("{label} shape {:?} != [{nlat}, {nlon}]", a);
+        }
+    }
+    if let Some(ei) = ens_incomplete {
+        if ei.dim() != (nlat, nlon) {
+            bail!("ens_incomplete shape {:?} != [{nlat}, {nlon}]", ei.dim());
         }
     }
     let (lo, hi) = (latitude_range_to_keep[0], latitude_range_to_keep[1]);
@@ -114,6 +145,11 @@ pub fn build_flags(
             if incomplete[[j, i]] {
                 f |= INCOMPLETE_TIMESERIES;
             }
+            if let Some(ei) = ens_incomplete {
+                if ei[[j, i]] {
+                    f |= ENSEMBLE_INCOMPLETE;
+                }
+            }
             // sentinel: bed_above_shallow ⇒ bed_above_deep under monotonic bathymetry
             if (f & BED_ABOVE_SHALLOW) != 0 && (f & BED_ABOVE_DEEP) == 0 {
                 bail!(
@@ -148,7 +184,7 @@ mod tests {
         let never = Array2::<bool>::from_elem((grid.nlat(), grid.nlon()), false);
         let incomplete = never.clone();
         let layer = LayerSpec { top: 15, bottom: 20 };
-        let f = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete)
+        let f = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete, None)
             .unwrap();
 
         assert_eq!(f[[90, 0]] & BED_ABOVE_SHALLOW, BED_ABOVE_SHALLOW);
@@ -174,17 +210,42 @@ mod tests {
         let layer = LayerSpec { top: 15, bottom: 20 };
 
         // No floor: neither cell flagged (both deeper than 20 m).
-        let f0 = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete)
+        let f0 = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete, None)
             .unwrap();
         assert_eq!(count(&f0, BED_ABOVE_FLOOR), 0);
 
         // Floor = 300 m: only the 150 m cell, and it does not touch the per-layer bed bits.
-        let f = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], Some(300.0), &never, &incomplete)
+        let f = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], Some(300.0), &never, &incomplete, None)
             .unwrap();
         assert_eq!(f[[90, 0]] & BED_ABOVE_FLOOR, BED_ABOVE_FLOOR);
         assert_eq!(f[[90, 0]] & BED_ABOVE_DEEP, 0); // 150 m is deeper than the 20 m layer bottom
         assert_eq!(f[[90, 1]] & BED_ABOVE_FLOOR, 0);
         assert_eq!(count(&f, BED_ABOVE_FLOOR), 1);
+    }
+
+    #[test]
+    fn ensemble_incomplete_unions_member_nans() {
+        // A member NaN at (t, lat, lon) marks that cell; a fully-finite column stays clear.
+        let grid = GridDef::mapping();
+        let (nlat, nlon) = (grid.nlat(), grid.nlon());
+        let mut ens = Array4::<f32>::from_elem((3, 4, nlat, nlon), 1.0); // 3 members, 4 timesteps
+        ens[[2, 1, 90, 5]] = f32::NAN;                                   // member 2, t=1, one cell
+        let ei = compute_ensemble_incomplete(&ens);
+        assert!(ei[[90, 5]]);
+        assert!(!ei[[90, 6]]);
+
+        // build_flags sets the bit there and nowhere finite; None leaves it unset everywhere.
+        let etopo = Array2::<f64>::from_elem((nlat, nlon), -4000.0);
+        let never = Array2::<bool>::from_elem((nlat, nlon), false);
+        let incomplete = never.clone();
+        let layer = LayerSpec { top: 15, bottom: 20 };
+        let with = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None,
+                               &never, &incomplete, Some(&ei)).unwrap();
+        assert_eq!(with[[90, 5]] & ENSEMBLE_INCOMPLETE, ENSEMBLE_INCOMPLETE);
+        assert_eq!(count(&with, ENSEMBLE_INCOMPLETE), 1);
+        let without = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None,
+                                  &never, &incomplete, None).unwrap();
+        assert_eq!(count(&without, ENSEMBLE_INCOMPLETE), 0);
     }
 
     #[test]
@@ -198,7 +259,7 @@ mod tests {
         // Inverted layer (top=20 deep, bottom=15 shallow) makes bed>-20 true, bed>-15 false →
         // BED_ABOVE_SHALLOW set, BED_ABOVE_DEEP unset → sentinel must fire.
         let bad = LayerSpec { top: 20, bottom: 15 };
-        let r = build_flags(&grid, &bad, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete);
+        let r = build_flags(&grid, &bad, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete, None);
         assert!(r.is_err());
     }
 }
