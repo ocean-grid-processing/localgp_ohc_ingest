@@ -5,7 +5,7 @@
 //! + `gzip` codecs — gzip via flate2 is pure Rust and read natively by zarr-python/xarray.
 //!
 //! Layout per layer (see ../zarr_schema.md):
-//!   ohc_mean      (time,lat,lon)         f32, 1 chunk
+//!   ohc_mean      (time,lat,lon)         f64, 1 chunk
 //!   ohc_ensemble  (member,time,lat,lon)  f32, chunk (1,time,lat,lon) → one file per member
 //!   mask_flags    (lat,lon)              u8
 //!   etopo         (lat,lon)              f32

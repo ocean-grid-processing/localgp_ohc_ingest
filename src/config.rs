@@ -36,6 +36,10 @@ pub struct RunConfig {
     pub latitude_range_to_keep: [f64; 2],
     /// basin ids to drop (land + marginal seas)
     pub basins_to_remove: Vec<i16>,
+    /// uniform bathymetry floor (m): flag cells shallower than this for every layer
+    /// (`bed_above_floor`). `None` = no floor. WMO/GCOS product uses 300.
+    #[serde(default)]
+    pub bathy_floor_m: Option<f64>,
     /// dir holding the FullField mean `.mat` files
     pub dir_mean: PathBuf,
     /// dir holding the LocalCondSim ensemble `.mat` files
@@ -66,6 +70,7 @@ impl RunConfig {
             model_name: "SpaceTimeTrend".into(),
             latitude_range_to_keep: [-64.5, 64.5],
             basins_to_remove: vec![0, 5, 6, 7, 8, 9, 53],
+            bathy_floor_m: None,
             dir_mean: PathBuf::from("."),
             dir_ensemble: PathBuf::from("."),
             dir_out: PathBuf::from("."),

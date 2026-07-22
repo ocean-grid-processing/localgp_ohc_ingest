@@ -41,12 +41,17 @@ The 101 big files map 1:1 onto LocalGP's output for the layer: one `FullField` m
 
 | array | dims | dtype | units | fill | chunk |
 |---|---|---|---|---|---|
-| `ohc_mean` | `(time, lat, lon)` | f32 | J/m² | NaN | whole array (1 chunk) |
+| `ohc_mean` | `(time, lat, lon)` | f64 | J/m² | NaN | whole array (1 chunk) |
 | `ohc_ensemble` | `(member, time, lat, lon)` | f32 | J/m² | NaN | `(1, time, lat, lon)` — 1 per member |
 | `mask_flags` | `(lat, lon)` | u8 | — | — | 1 chunk |
 | `etopo` | `(lat, lon)` | f32 | m | NaN | 1 chunk |
 | `basin_id` | `(lat, lon)` | i16 | — | — | 1 chunk |
 | `cell_area` | `(lat, lon)` | f64 | m² | — | 1 chunk |
+
+`ohc_mean` is **f64**: downstream products (e.g. the GCOS deliverable) take a large-mean anomaly
+(absolute OHC − baseline), a cancellation that needs double precision. `ohc_ensemble` stays **f32**
+— it only feeds ensemble spread (`_sd`), where single precision is ample and halves the
+100-member footprint.
 
 ### Coordinates
 

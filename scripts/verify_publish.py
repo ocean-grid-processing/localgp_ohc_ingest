@@ -11,10 +11,10 @@ J/m^2 -> TJ/m^2, time re-referenced to 1900). Uses scipy.io.loadmat as an indepe
 `publish.py --ensemble`, located by swapping the `OHC_` filename prefix) member-by-member
 against the `.mat` ensemble.
 
-Checks hold to a small float32-scale tolerance, not bit-for-bit: the TJ/m^2 unit conversion
-(divide by 1e12) happens in float32 in the pipeline, and 1e12 isn't even exactly representable
-in float32, so a last-ULP (~1e-7 relative) difference from a float64 recompute is expected and
-harmless.
+The mean (DATA) is float64 end to end by default, so it matches a float64 recompute to ~1e-12;
+published with `--dtype float32` it holds only to ~1e-6 (the float32 /1e12 rounding, and 1e12
+isn't exactly representable in float32). The ensemble (DATA_SD, OHCENS) stays float32, so those
+checks use the looser float32 tolerance. The DATA tolerance adapts to the stored dtype.
 Requires: xarray, numpy, scipy, netCDF4.
 """
 import argparse
@@ -25,14 +25,15 @@ import xarray as xr
 from scipy.io import loadmat
 
 TERA = 1e12
-DATA_RTOL = 1e-6   # ~8 float32 ULP; absorbs the float32 /1e12 rounding
 SD_RTOL = 1e-3
+ENS_RTOL = 1e-6    # OHCENS members are float32; absorbs the float32 /1e12 rounding
 
 
-def expected_data(mat_lonlat, cp0, rho0):
-    """Mimic the ingest+publish casts: f32(OHC) then f32(/TERA)."""
-    s = np.float32(mat_lonlat * cp0 * rho0)            # ingest store value (J/m^2, f32)
-    return np.float32(s.astype(np.float64) / TERA)     # publish value (TJ/m^2, f32)
+def expected_data(mat_lonlat, cp0, rho0, out_dtype):
+    """Recompute the published DATA in float64 (ingest stores the mean f64) and cast to the
+    submission's stored dtype — float64 by default, float32 if published with --dtype float32."""
+    v = (mat_lonlat.astype(np.float64) * cp0 * rho0) / TERA   # J/m^2 -> TJ/m^2, f64
+    return v.astype(out_dtype)
 
 
 def expected_sd(ens_lonlatmember, cp0, rho0):
@@ -69,6 +70,8 @@ def main():
     has_sd = ("DATA_SD" in ds) and not args.no_sd
 
     data = ds["DATA"].values                            # [lon, lat, time], TJ/m^2
+    data_dtype = ds["DATA"].dtype
+    data_rtol = 1e-12 if np.dtype(data_dtype) == np.float64 else 1e-6
     data_sd = ds["DATA_SD"].values if has_sd else None
 
     data_ens = None
@@ -101,14 +104,14 @@ def main():
         stem = "%sFullField%%s%s_%s_%02d_%d.mat" % (var, model, layer, month, year)
 
         mean_path = os.path.join(args.dir_mean, stem % "")
-        exp = expected_data(loadmat(mean_path)["fullFieldGrid"], cp0, rho0)
+        exp = expected_data(loadmat(mean_path)["fullFieldGrid"], cp0, rho0, data_dtype)
         got = data[:, :, t]
         finite = np.isfinite(got)
         assert np.all(np.isfinite(exp[finite])), "DATA finite where .mat is NaN at %04d-%02d" % (year, month)
         if finite.any():
             md = float(np.abs(got[finite] - exp[finite]).max())
             scale = float(np.abs(exp[finite]).max())
-            assert md <= DATA_RTOL * scale, \
+            assert md <= data_rtol * scale, \
                 "DATA differs at %04d-%02d (max %g, field scale %g)" % (year, month, md, scale)
             worst_data = max(worst_data, md)
 
@@ -130,7 +133,7 @@ def main():
                 if finite.any():
                     me = float(np.abs(got_e[finite] - exp_e[finite]).max())
                     scale = float(np.abs(exp_e[finite]).max())
-                    assert me <= DATA_RTOL * scale, \
+                    assert me <= ENS_RTOL * scale, \
                         "OHCENS differs at %04d-%02d (max %g, field scale %g)" % (year, month, me, scale)
                     worst_ens = max(worst_ens, me)
 

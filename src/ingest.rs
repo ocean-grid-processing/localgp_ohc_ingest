@@ -16,9 +16,11 @@ use crate::config::{RunConfig, Slice};
 use crate::{matread, GridDef};
 
 pub struct LayerData {
-    /// `[time, lat, lon]`, OHC J/m², NaN preserved.
-    pub ohc_mean: Array3<f32>,
-    /// `[member, time, lat, lon]`, OHC J/m², NaN preserved.
+    /// `[time, lat, lon]`, OHC J/m², NaN preserved. f64: the deliverable takes a large-mean
+    /// anomaly (absolute OHC − baseline), so the mean is kept double all the way through.
+    pub ohc_mean: Array3<f64>,
+    /// `[member, time, lat, lon]`, OHC J/m², NaN preserved. f32: only feeds ensemble spread
+    /// (`_sd`), where single precision is ample, and keeps the 100-member stack half the size.
     pub ohc_ensemble: Array4<f32>,
 }
 
@@ -32,7 +34,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef) -> Result<La
     let nm = crate::consts::NMEMBER;
     let scale = cfg.cp0 * cfg.rho0;
 
-    let mut ohc_mean = Array3::<f32>::from_elem((nt, nlat, nlon), f32::NAN);
+    let mut ohc_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
     let mut ohc_ensemble = Array4::<f32>::from_elem((nm, nt, nlat, nlon), f32::NAN);
 
     for (t, &(year, month)) in time.iter().enumerate() {
@@ -43,7 +45,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef) -> Result<La
         debug_assert_eq!(mean.dim(), (nlon, nlat));
         for j in 0..nlat {
             for i in 0..nlon {
-                ohc_mean[[t, j, i]] = (mean[[i, j]] * scale) as f32; // transpose [lon,lat]→[lat,lon]
+                ohc_mean[[t, j, i]] = mean[[i, j]] * scale; // transpose [lon,lat]→[lat,lon]
             }
         }
 

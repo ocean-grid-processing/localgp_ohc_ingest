@@ -149,7 +149,7 @@ fn main() -> Result<()> {
     let (never, incomplete) = masks::compute_validity(&data.ohc_mean);
     let flags = masks::build_flags(
         &grid, &slice.layer, &etopo, Some(&basin_id),
-        cfg.latitude_range_to_keep, &cfg.basins_to_remove, &never, &incomplete,
+        cfg.latitude_range_to_keep, &cfg.basins_to_remove, cfg.bathy_floor_m, &never, &incomplete,
     )?;
     let store = zarrwrite::write_layer_store(
         &cfg, &slice, &grid, &data, &flags, &etopo, &basin_id, &cell_area,
