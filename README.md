@@ -133,10 +133,16 @@ mode, since each layer is an independent store.
 
 ```bash
 ./ohc_ingest config.toml --tag OP20260110 --layer 0-286.6 --years 2004:2025 --months 1:12
+
+# mean-only (skip LocalCondSim; omits ohc_ensemble) — for mean-only products like the GCOS
+# deliverable, or when the CondSim set is incomplete:
+./ohc_ingest config.toml --tag OP20260110 --layer 700-1000 --years 2004:2025 --months 1:12 --no-ensemble
 ```
 
 Paths come from `config.toml` (positional) or the `OHC_DIR_MEAN` / `OHC_DIR_ENSEMBLE` /
-`OHC_DIR_OUT` / `OHC_ETOPO` / `OHC_BASINMASK` env vars. Complete cluster job:
+`OHC_DIR_OUT` / `OHC_ETOPO` / `OHC_BASINMASK` env vars. `--no-ensemble` (or `OHC_NO_ENSEMBLE`)
+reads only the FullField mean and writes a store without `ohc_ensemble`; `publish.py` then emits
+`DATA` without `DATA_SD`, and `--ensemble` on such a store is an error. Complete cluster job:
 [`ohc_ingest.slurm`](ohc_ingest.slurm).
 
 Note: when run from a scheduler, pass `config.toml` explicitly and use **absolute paths**

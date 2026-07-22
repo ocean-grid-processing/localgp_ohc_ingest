@@ -1,11 +1,13 @@
 //! ohc_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --layer T-B --years Y|A:B --months M|A:B|M,M,...
+//!   ohc_ingest [config.toml] --tag NAME --layer T-B --years Y|A:B --months M|A:B|M,M,... [--no-ensemble]
 //!
 //! `--tag`, `--layer`, `--years`, `--months` are REQUIRED (one run = one layer over one time
 //! slice). Each may also be given via env (`OHC_TAG`, `OHC_LAYER`, `OHC_YEARS`, `OHC_MONTHS`);
 //! CLI wins. `--tag` is the run identifier and labels the output store + metadata.
+//! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
+//! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
 //! (`OHC_DIR_MEAN`, `OHC_DIR_ENSEMBLE`, `OHC_DIR_OUT`, `OHC_ETOPO`, `OHC_BASINMASK`) when no
 //! config is given.
@@ -30,14 +32,21 @@ struct Cli {
     layer: Option<LayerSpec>,
     years: Option<[i32; 2]>,
     months: Option<Vec<u32>>,
+    no_ensemble: bool,
 }
 
 fn parse_cli() -> Result<Cli> {
     let args: Vec<String> = env::args().skip(1).collect();
-    let mut cli = Cli { config_path: None, tag: None, layer: None, years: None, months: None };
+    let mut cli = Cli {
+        config_path: None, tag: None, layer: None, years: None, months: None,
+        no_ensemble: env::var_os("OHC_NO_ENSEMBLE").is_some(),
+    };
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--no-ensemble" => {
+                cli.no_ensemble = true;
+            }
             "--tag" => {
                 i += 1;
                 cli.tag = Some(args.get(i).context("--tag needs a value")?.clone());
@@ -143,8 +152,9 @@ fn main() -> Result<()> {
     let cell_area = gridmod::cell_area(&grid);
 
     let t0 = Instant::now();
-    eprintln!(">>> layer {} dbar", slice.layer.tag());
-    let data = ingest::ingest_layer(&cfg, &slice, &grid)
+    eprintln!(">>> layer {} dbar{}", slice.layer.tag(),
+        if cli.no_ensemble { " (mean-only, --no-ensemble)" } else { "" });
+    let data = ingest::ingest_layer(&cfg, &slice, &grid, cli.no_ensemble)
         .with_context(|| format!("ingesting layer {}", slice.layer.tag()))?;
     let (never, incomplete) = masks::compute_validity(&data.ohc_mean);
     let flags = masks::build_flags(

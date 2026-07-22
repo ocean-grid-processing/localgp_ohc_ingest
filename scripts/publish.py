@@ -82,6 +82,12 @@ def main():
     ds = xr.open_zarr(args.store, consolidated=False)  # decodes time -> datetime64
     g = ds.attrs
     product = args.product or g["mapped_fields_tag"]
+    has_ens = "ohc_ensemble" in ds.data_vars           # False for mean-only (--no-ensemble) stores
+    if args.ensemble and not has_ens:
+        raise SystemExit("--ensemble requested but %s has no ohc_ensemble "
+                         "(ingested with --no-ensemble)" % args.store)
+    if not has_ens and not args.no_uncertainty:
+        print("note: mean-only store (no ohc_ensemble) — writing DATA without DATA_SD")
 
     # --- collapse the selected mask bits to NaN ---
     mval = preset_mask_value(args.preset)
@@ -93,7 +99,7 @@ def main():
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
     # ddof=1 (sample standard deviation); this reads all ensemble members.
-    include_sd = not args.no_uncertainty
+    include_sd = not args.no_uncertainty and has_ens
     sd = (ds["ohc_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
 
     # --- time -> days since 1900-01-01 ---

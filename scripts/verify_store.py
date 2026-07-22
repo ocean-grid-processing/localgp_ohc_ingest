@@ -43,20 +43,23 @@ def main(store, dir_mean, dir_ensemble):
     var = ds.attrs["var_name"]
     model = ds.attrs["model_name"]
     scale = cp0 * rho0
+    has_ens = "ohc_ensemble" in ds        # mean-only stores (ingested --no-ensemble) omit it
 
     units = ds["time"].attrs["units"]            # "days since YYYY-MM-15"
     y0, m0, d0 = (int(x) for x in units.split("since")[1].strip().split("-"))
     base = datetime.date(y0, m0, d0)
     times = np.asarray(ds["time"].values)
     nt = len(times)
-    print("checking %s plev%d_%d — %d timesteps, %d members"
-          % (ds.attrs.get("mapped_fields_tag"), top, bottom, nt, ds.sizes["member"]))
+    print("checking %s plev%d_%d — %d timesteps, %s"
+          % (ds.attrs.get("mapped_fields_tag"), top, bottom, nt,
+             ("%d members" % ds.sizes["member"]) if has_ens else "mean-only (no ensemble)"))
 
     # Read each side once: full store into memory, then stream the month-major .mat.
-    print("loading full store into memory (~%.1f GB)…"
-          % (ds["ohc_ensemble"].size * 4 / 1e9))
+    if has_ens:
+        print("loading full store into memory (~%.1f GB)…"
+              % (ds["ohc_ensemble"].size * 4 / 1e9))
     zmean_all = ds["ohc_mean"].values            # [time, lat, lon]
-    zens_all = ds["ohc_ensemble"].values         # [member, time, lat, lon]
+    zens_all = ds["ohc_ensemble"].values if has_ens else None   # [member, time, lat, lon]
 
     worst_mean = 0.0
     worst_ens = 0.0
@@ -74,18 +77,22 @@ def main(store, dir_mean, dir_ensemble):
         assert md == 0.0, "ohc_mean differs at %04d-%02d (max %g)" % (year, month, md)
         worst_mean = max(worst_mean, md)
 
-        # ensemble: [lon, lat, member] -> [member, lat, lon]
-        mat_ens = np.transpose(loadmat(ens_path)["fullFieldGrid"], (2, 1, 0)) * scale
-        ok, md = compare(mat_ens, zens_all[:, t])
-        assert ok, "ohc_ensemble NaN footprint differs at %04d-%02d" % (year, month)
-        assert md == 0.0, "ohc_ensemble differs at %04d-%02d (max %g)" % (year, month, md)
-        worst_ens = max(worst_ens, md)
+        # ensemble: [lon, lat, member] -> [member, lat, lon]  (skipped for mean-only stores)
+        if has_ens:
+            mat_ens = np.transpose(loadmat(ens_path)["fullFieldGrid"], (2, 1, 0)) * scale
+            ok, md = compare(mat_ens, zens_all[:, t])
+            assert ok, "ohc_ensemble NaN footprint differs at %04d-%02d" % (year, month)
+            assert md == 0.0, "ohc_ensemble differs at %04d-%02d (max %g)" % (year, month, md)
+            worst_ens = max(worst_ens, md)
 
         if (t + 1) % 24 == 0 or t == nt - 1:
             print("  checked %d/%d timesteps (through %04d-%02d)" % (t + 1, nt, year, month))
 
-    print("PASS — %d timesteps × %d members; ohc_mean max diff=%g, ohc_ensemble max diff=%g"
-          % (nt, ds.sizes["member"], worst_mean, worst_ens))
+    if has_ens:
+        print("PASS — %d timesteps × %d members; ohc_mean max diff=%g, ohc_ensemble max diff=%g"
+              % (nt, ds.sizes["member"], worst_mean, worst_ens))
+    else:
+        print("PASS — %d timesteps, mean-only; ohc_mean max diff=%g" % (nt, worst_mean))
 
 
 if __name__ == "__main__":

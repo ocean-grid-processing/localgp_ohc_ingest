@@ -21,11 +21,17 @@ pub struct LayerData {
     pub ohc_mean: Array3<f64>,
     /// `[member, time, lat, lon]`, OHC J/m², NaN preserved. f32: only feeds ensemble spread
     /// (`_sd`), where single precision is ample, and keeps the 100-member stack half the size.
-    pub ohc_ensemble: Array4<f32>,
+    /// `None` when ingested mean-only (`--no-ensemble`) — the CondSim files are not read and
+    /// `ohc_ensemble` is omitted from the store.
+    pub ohc_ensemble: Option<Array4<f32>>,
 }
 
 /// Read every month of the slice's layer and assemble the member-major arrays.
-pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef) -> Result<LayerData> {
+///
+/// `mean_only` (from `--no-ensemble`) skips the LocalCondSim files entirely and returns
+/// `ohc_ensemble: None` — for mean-only products (e.g. the GCOS deliverable) where the ensemble
+/// is never used downstream, and to run without a complete set of CondSim `.mat` files.
+pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: bool) -> Result<LayerData> {
     let layer = &slice.layer;
     let nlat = grid.nlat();
     let nlon = grid.nlon();
@@ -35,7 +41,11 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef) -> Result<La
     let scale = cfg.cp0 * cfg.rho0;
 
     let mut ohc_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
-    let mut ohc_ensemble = Array4::<f32>::from_elem((nm, nt, nlat, nlon), f32::NAN);
+    let mut ohc_ensemble = if mean_only {
+        None
+    } else {
+        Some(Array4::<f32>::from_elem((nm, nt, nlat, nlon), f32::NAN))
+    };
 
     for (t, &(year, month)) in time.iter().enumerate() {
         // FullField mean: [lon, lat]
@@ -49,15 +59,17 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef) -> Result<La
             }
         }
 
-        // LocalCondSim ensemble: [lon, lat, member]
-        let ens_path = cfg.mat_path(layer, year, month, true);
-        let ens = matread::read_ensemble(&ens_path)
-            .with_context(|| format!("reading {}", ens_path.display()))?;
-        debug_assert_eq!(ens.dim(), (nlon, nlat, nm));
-        for m in 0..nm {
-            for j in 0..nlat {
-                for i in 0..nlon {
-                    ohc_ensemble[[m, t, j, i]] = (ens[[i, j, m]] * scale) as f32;
+        // LocalCondSim ensemble: [lon, lat, member] — skipped entirely when mean_only
+        if let Some(ens_arr) = ohc_ensemble.as_mut() {
+            let ens_path = cfg.mat_path(layer, year, month, true);
+            let ens = matread::read_ensemble(&ens_path)
+                .with_context(|| format!("reading {}", ens_path.display()))?;
+            debug_assert_eq!(ens.dim(), (nlon, nlat, nm));
+            for m in 0..nm {
+                for j in 0..nlat {
+                    for i in 0..nlon {
+                        ens_arr[[m, t, j, i]] = (ens[[i, j, m]] * scale) as f32;
+                    }
                 }
             }
         }
