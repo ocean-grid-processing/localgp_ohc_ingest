@@ -10,7 +10,8 @@
 //! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
 //! (`OHC_DIR_MEAN`, `OHC_DIR_ENSEMBLE`, `OHC_DIR_OUT`, `OHC_ETOPO`, `OHC_BASINMASK`) when no
-//! config is given.
+//! config is given. `--dir-mean`, `--dir-ensemble`, `--dir-out` override those directories on the
+//! command line (CLI wins over both config and env) — for munging paths per shell submission.
 //!
 //! Examples:
 //!   ohc_ingest --layer 15-20 --years 2016 --months 8
@@ -33,6 +34,9 @@ struct Cli {
     years: Option<[i32; 2]>,
     months: Option<Vec<u32>>,
     no_ensemble: bool,
+    dir_mean: Option<PathBuf>,
+    dir_ensemble: Option<PathBuf>,
+    dir_out: Option<PathBuf>,
 }
 
 fn parse_cli() -> Result<Cli> {
@@ -40,12 +44,25 @@ fn parse_cli() -> Result<Cli> {
     let mut cli = Cli {
         config_path: None, tag: None, layer: None, years: None, months: None,
         no_ensemble: env::var_os("OHC_NO_ENSEMBLE").is_some(),
+        dir_mean: None, dir_ensemble: None, dir_out: None,
     };
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--no-ensemble" => {
                 cli.no_ensemble = true;
+            }
+            "--dir-mean" => {
+                i += 1;
+                cli.dir_mean = Some(PathBuf::from(args.get(i).context("--dir-mean needs a value")?.clone()));
+            }
+            "--dir-ensemble" => {
+                i += 1;
+                cli.dir_ensemble = Some(PathBuf::from(args.get(i).context("--dir-ensemble needs a value")?.clone()));
+            }
+            "--dir-out" => {
+                i += 1;
+                cli.dir_out = Some(PathBuf::from(args.get(i).context("--dir-out needs a value")?.clone()));
             }
             "--tag" => {
                 i += 1;
@@ -114,6 +131,10 @@ fn resolve_slice(cli: &Cli) -> Result<Slice> {
 fn main() -> Result<()> {
     let cli = parse_cli()?;
     let mut cfg = load_run_config(&cli.config_path)?;
+    // CLI path overrides win over config.toml / env (handy for munging dirs per shell submission).
+    if let Some(p) = &cli.dir_mean { cfg.dir_mean = p.clone(); }
+    if let Some(p) = &cli.dir_ensemble { cfg.dir_ensemble = p.clone(); }
+    if let Some(p) = &cli.dir_out { cfg.dir_out = p.clone(); }
     cfg.run_tag = match &cli.tag {
         Some(t) => t.clone(),
         None => match env::var("OHC_TAG") {

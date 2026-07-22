@@ -10,6 +10,11 @@ model_name = "SpaceTimeTrend"
 latitude_range_to_keep = [-64.5, 64.5]
 basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
 
+# Uniform bathymetry floor (m): flag `bed_above_floor` on every cell shallower than this, for
+# all layers alike (the `wmo` publish preset honors it). Omit for no floor (ME4OH). The GCOS /
+# WMO product uses 300 — matches the original `max_pressure_to_keep = 300`. Write it as a float.
+# bathy_floor_m = 300.0
+
 # LocalGP .mat output dirs — mean and ensemble live in separate directories.
 # Use absolute paths on the cluster (jobs may start in an unpredictable cwd).
 dir_mean       = "/path/to/mapping/.../Results/FullField"
