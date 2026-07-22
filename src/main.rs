@@ -10,8 +10,9 @@
 //! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
 //! (`OHC_DIR_MEAN`, `OHC_DIR_ENSEMBLE`, `OHC_DIR_OUT`, `OHC_ETOPO`, `OHC_BASINMASK`) when no
-//! config is given. `--dir-mean`, `--dir-ensemble`, `--dir-out` override those directories on the
+//! config is given. `--dir_mean`, `--dir_ensemble`, `--dir_out` override those directories on the
 //! command line (CLI wins over both config and env) — for munging paths per shell submission.
+//! The config may omit those three dirs entirely (they default to `.`) and rely on the flags.
 //!
 //! Examples:
 //!   ohc_ingest --layer 15-20 --years 2016 --months 8
@@ -52,17 +53,17 @@ fn parse_cli() -> Result<Cli> {
             "--no-ensemble" => {
                 cli.no_ensemble = true;
             }
-            "--dir-mean" => {
+            "--dir_mean" => {
                 i += 1;
-                cli.dir_mean = Some(PathBuf::from(args.get(i).context("--dir-mean needs a value")?.clone()));
+                cli.dir_mean = Some(PathBuf::from(args.get(i).context("--dir_mean needs a value")?.clone()));
             }
-            "--dir-ensemble" => {
+            "--dir_ensemble" => {
                 i += 1;
-                cli.dir_ensemble = Some(PathBuf::from(args.get(i).context("--dir-ensemble needs a value")?.clone()));
+                cli.dir_ensemble = Some(PathBuf::from(args.get(i).context("--dir_ensemble needs a value")?.clone()));
             }
-            "--dir-out" => {
+            "--dir_out" => {
                 i += 1;
-                cli.dir_out = Some(PathBuf::from(args.get(i).context("--dir-out needs a value")?.clone()));
+                cli.dir_out = Some(PathBuf::from(args.get(i).context("--dir_out needs a value")?.clone()));
             }
             "--tag" => {
                 i += 1;

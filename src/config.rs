@@ -40,11 +40,14 @@ pub struct RunConfig {
     /// (`bed_above_floor`). `None` = no floor. WMO/GCOS product uses 300.
     #[serde(default)]
     pub bathy_floor_m: Option<f64>,
-    /// dir holding the FullField mean `.mat` files
+    /// dir holding the FullField mean `.mat` files (may be omitted here and set via `--dir_mean`)
+    #[serde(default = "default_dir")]
     pub dir_mean: PathBuf,
-    /// dir holding the LocalCondSim ensemble `.mat` files
+    /// dir holding the LocalCondSim ensemble `.mat` files (or set via `--dir_ensemble`)
+    #[serde(default = "default_dir")]
     pub dir_ensemble: PathBuf,
-    /// where the zarr stores are written
+    /// where the zarr stores are written (or set via `--dir_out`)
+    #[serde(default = "default_dir")]
     pub dir_out: PathBuf,
     /// path to etopo60.cdf
     pub etopo_path: PathBuf,
@@ -59,6 +62,7 @@ pub struct RunConfig {
 fn default_cp0() -> f64 { crate::consts::CP0 }
 fn default_rho0() -> f64 { crate::consts::RHO0 }
 fn default_tag() -> String { "UNSET".into() }
+fn default_dir() -> PathBuf { PathBuf::from(".") }
 
 impl RunConfig {
     /// Constant defaults (current LocalGP conventions). The run tag and paths are

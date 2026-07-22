@@ -17,6 +17,8 @@ basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
 
 # LocalGP .mat output dirs — mean and ensemble live in separate directories.
 # Use absolute paths on the cluster (jobs may start in an unpredictable cwd).
+# These three are OPTIONAL here: omit them and pass --dir_mean / --dir_ensemble / --dir_out on the
+# command line to munge paths per submission (CLI wins; unset defaults to ".").
 dir_mean       = "/path/to/mapping/.../Results/FullField"
 dir_ensemble   = "/path/to/mapping/.../Results/FullFieldLocalCondSim"
 dir_out        = "/path/to/output/ohc_zarr"

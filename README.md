@@ -140,14 +140,15 @@ mode, since each layer is an independent store.
 
 # keep the constants in config.toml but override the I/O dirs per submission:
 ./ohc_ingest config.toml --tag OP20260110 --layer 15-20 --years 2004:2025 --months 1:12 \
-    --dir-mean /run/FullField --dir-ensemble /run/FullFieldLocalCondSim --dir-out /scratch/zarr
+    --dir_mean /run/FullField --dir_ensemble /run/FullFieldLocalCondSim --dir_out /scratch/zarr
 ```
 
 Paths come from `config.toml` (positional) or the `OHC_DIR_MEAN` / `OHC_DIR_ENSEMBLE` /
 `OHC_DIR_OUT` / `OHC_ETOPO` / `OHC_BASINMASK` env vars (env only applies when **no** config is
-given). The `--dir-mean` / `--dir-ensemble` / `--dir-out` flags override those directories and win
-over both config and env — handy for munging paths in shell submissions while keeping the
-constants in one `config.toml`. `--no-ensemble` (or `OHC_NO_ENSEMBLE`)
+given). The `--dir_mean` / `--dir_ensemble` / `--dir_out` flags (underscores, matching the TOML
+keys) override those directories and win over both config and env — handy for munging paths in
+shell submissions while keeping the constants in one `config.toml`; the config may omit those
+three dirs entirely (they default to `.`). `--no-ensemble` (or `OHC_NO_ENSEMBLE`)
 reads only the FullField mean and writes a store without `ohc_ensemble`; `publish.py` then emits
 `DATA` without `DATA_SD`, and `--ensemble` on such a store is an error. Complete cluster job:
 [`ohc_ingest.slurm`](ohc_ingest.slurm).
