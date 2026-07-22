@@ -13,9 +13,10 @@ Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.
-  wmo             = all bits (adds outside_latitude, removed_basin, bed_above_floor) — our
-                    cropped product (bed_above_floor drops cells shallower than the ingest-time
-                    uniform bathy floor, e.g. 300 m for the GCOS deliverable).
+  wmo             = validity + outside_latitude + removed_basin + bed_above_floor — our cropped
+                    product. Uses ONLY the uniform bathy floor (bed_above_floor, e.g. 300 m), NOT
+                    the per-layer bed_above_shallow/deep bits, so partial-depth continental-slope
+                    cells are kept — matching the original WMO/GCOS domain.
 
 --ensemble additionally writes the full conditional-simulation ensemble as a sibling file
   OHCENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
@@ -43,7 +44,12 @@ BITS = {
 }
 PRESETS = {
     "me4oh": ["never_estimated", "incomplete_timeseries", "bed_above_shallow", "bed_above_deep"],
-    "wmo": list(BITS),  # all bits, incl. outside_latitude, removed_basin, bed_above_floor
+    # WMO/GCOS domain: matches the original, which uses ONLY the uniform bathy floor (not the
+    # per-layer bed_above_* bits). Keeping the per-layer bed cuts would drop partial-depth
+    # continental-slope cells that the original retains (they contribute to the deep layers), so
+    # bed_above_shallow/bed_above_deep are deliberately excluded here.
+    "wmo": ["never_estimated", "incomplete_timeseries", "outside_latitude",
+            "removed_basin", "bed_above_floor"],
 }
 TERA = 1e12
 

@@ -54,9 +54,10 @@ keep = (mask_flags & USABLE) == 0
 
 Drop bits from the selector to relax a policy: a global (un-cropped) integral uses
 `USABLE & ~outside_latitude`; tolerating partial-depth cells drops `bed_above_deep`; including
-marginal seas drops `removed_basin`. `publish.py` ships two presets — `me4oh` honors only the
-physical bits (0,1,4,5), `wmo` honors all seven (adds `outside_latitude`, `removed_basin`,
-`bed_above_floor`).
+marginal seas drops `removed_basin`. `publish.py` ships two presets — `me4oh` honors the physical
+bits (0,1,4,5); `wmo` honors validity + `outside_latitude` + `removed_basin` + `bed_above_floor`
+but **not** the per-layer `bed_above_shallow`/`bed_above_deep`, so partial-depth continental-slope
+cells are retained (matching the original WMO/GCOS domain, which uses only the uniform floor).
 
 ## Sentinel (free correctness check)
 
