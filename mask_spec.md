@@ -60,10 +60,14 @@ keep = (mask_flags & USABLE) == 0
 Drop bits from the selector to relax a policy: a global (un-cropped) integral uses
 `USABLE & ~outside_latitude`; tolerating partial-depth cells drops `bed_above_deep`; including
 marginal seas drops `removed_basin`. `publish.py` ships two presets — `me4oh` honors the physical
-bits (0,1,4,5); `wmo` honors validity + `outside_latitude` + `removed_basin` + `bed_above_floor` +
-`ensemble_incomplete`, but **not** the per-layer `bed_above_shallow`/`bed_above_deep`, so
-partial-depth continental-slope cells are retained (matching the original WMO/GCOS domain: uniform
-floor only, plus the mean∪members validity union).
+bits (0,1,4,5); `wmo` honors validity + `outside_latitude` + `removed_basin` + `bed_above_shallow`
++ `bed_above_floor` + `ensemble_incomplete`, but **not** `bed_above_deep`. The `bed_above_shallow`
+vs `bed_above_deep` split is deliberate: drop cells where the layer is *entirely* below the seabed
+(fully dry, `bed_above_shallow`), but keep *partial* cells where the seabed cuts through the layer
+(`bed_above_deep` off) — the continental-slope cells the original retains. Honoring
+`bed_above_shallow` also guarantees a deeper-topped layer's footprint is a subset of a
+shallower-topped one with the same bottom (e.g. `A(1800_1850) ⊆ A(700_1850)`), which the mapping's
+own NaNs don't always enforce.
 
 ## Sentinel (free correctness check)
 

@@ -13,10 +13,11 @@ Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.
-  wmo             = validity + outside_latitude + removed_basin + bed_above_floor — our cropped
-                    product. Uses ONLY the uniform bathy floor (bed_above_floor, e.g. 300 m), NOT
-                    the per-layer bed_above_shallow/deep bits, so partial-depth continental-slope
-                    cells are kept — matching the original WMO/GCOS domain.
+  wmo             = validity + outside_latitude + removed_basin + bed_above_shallow +
+                    bed_above_floor (+ ensemble_incomplete) — our cropped product. Drops fully-dry
+                    cells (bed_above_shallow) and shelves shallower than the uniform floor, but
+                    KEEPS partial cells where the seabed cuts through the layer (bed_above_deep is
+                    NOT honored) — matching the original WMO/GCOS domain.
 
 --ensemble additionally writes the full conditional-simulation ensemble as a sibling file
   OHCENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
@@ -45,14 +46,15 @@ BITS = {
 }
 PRESETS = {
     "me4oh": ["never_estimated", "incomplete_timeseries", "bed_above_shallow", "bed_above_deep"],
-    # WMO/GCOS domain: matches the original, which uses ONLY the uniform bathy floor (not the
-    # per-layer bed_above_* bits). Keeping the per-layer bed cuts would drop partial-depth
-    # continental-slope cells that the original retains (they contribute to the deep layers), so
-    # bed_above_shallow/bed_above_deep are deliberately excluded here. `ensemble_incomplete`
-    # reproduces the original's mean∪members mask (drops cells some CondSim member NaNs); it is
-    # unset when the store was ingested --no-ensemble, so mean-only stays mean-only.
-    "wmo": ["never_estimated", "incomplete_timeseries", "outside_latitude",
-            "removed_basin", "bed_above_floor", "ensemble_incomplete"],
+    # WMO/GCOS domain. Bathymetry: honor bed_above_shallow (drop cells where the layer is
+    # ENTIRELY below the seabed — fully dry, zero water) but NOT bed_above_deep (keep PARTIAL
+    # cells where the seabed cuts through the layer — they hold water and the original retains
+    # them). This keeps the continental-slope partial cells while excluding fully-dry cells the
+    # mapping sometimes leaves as values rather than NaN (the deepest layer, 1800_1850). Plus the
+    # uniform bathy floor. `ensemble_incomplete` reproduces the original's mean∪members mask
+    # (unset for --no-ensemble stores, so mean-only stays mean-only).
+    "wmo": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
+            "bed_above_shallow", "bed_above_floor", "ensemble_incomplete"],
 }
 TERA = 1e12
 
