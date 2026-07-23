@@ -40,6 +40,12 @@ pub struct RunConfig {
     /// (`bed_above_floor`). `None` = no floor. WMO/GCOS product uses 300.
     #[serde(default)]
     pub bathy_floor_m: Option<f64>,
+    /// value in the mapping `.mat` that means "missing" → converted to NaN at ingest (so the
+    /// validity bits drop the cell), mirroring the original's `val2use_asNaN`. `None` = only NaN
+    /// is missing. WMO/GCOS uses 0.0 (absolute OHC is never 0 at a wet cell, so 0 is a safe
+    /// sentinel). Compared against the raw mapping value before the cp0·rho0 scaling.
+    #[serde(default)]
+    pub missing_sentinel: Option<f64>,
     /// dir holding the FullField mean `.mat` files (may be omitted here and set via `--dir_mean`)
     #[serde(default = "default_dir")]
     pub dir_mean: PathBuf,
@@ -75,6 +81,7 @@ impl RunConfig {
             latitude_range_to_keep: [-64.5, 64.5],
             basins_to_remove: vec![0, 5, 6, 7, 8, 9, 53],
             bathy_floor_m: None,
+            missing_sentinel: None,
             dir_mean: PathBuf::from("."),
             dir_ensemble: PathBuf::from("."),
             dir_out: PathBuf::from("."),

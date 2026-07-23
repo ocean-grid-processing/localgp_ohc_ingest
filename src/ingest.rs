@@ -31,6 +31,10 @@ pub struct LayerData {
 /// `mean_only` (from `--no-ensemble`) skips the LocalCondSim files entirely and returns
 /// `ohc_ensemble: None` — for mean-only products (e.g. the GCOS deliverable) where the ensemble
 /// is never used downstream, and to run without a complete set of CondSim `.mat` files.
+///
+/// `cfg.missing_sentinel` (e.g. `0.0`), if set, converts any raw mapping value equal to it into
+/// NaN here at read time — so a cell the mapping zero-filled (rather than NaN-filled) is treated
+/// as missing everywhere downstream, matching the original's `val2use_asNaN` sentinel.
 pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: bool) -> Result<LayerData> {
     let layer = &slice.layer;
     let nlat = grid.nlat();
@@ -39,6 +43,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
     let nt = time.len();
     let nm = crate::consts::NMEMBER;
     let scale = cfg.cp0 * cfg.rho0;
+    let sentinel = cfg.missing_sentinel; // raw mapping value meaning "missing" (e.g. 0.0); -> NaN
 
     let mut ohc_mean = Array3::<f64>::from_elem((nt, nlat, nlon), f64::NAN);
     let mut ohc_ensemble = if mean_only {
@@ -55,7 +60,8 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
         debug_assert_eq!(mean.dim(), (nlon, nlat));
         for j in 0..nlat {
             for i in 0..nlon {
-                ohc_mean[[t, j, i]] = mean[[i, j]] * scale; // transpose [lon,lat]→[lat,lon]
+                let v = mean[[i, j]]; // transpose [lon,lat]→[lat,lon]
+                ohc_mean[[t, j, i]] = if sentinel == Some(v) { f64::NAN } else { v * scale };
             }
         }
 
@@ -68,7 +74,9 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
             for m in 0..nm {
                 for j in 0..nlat {
                     for i in 0..nlon {
-                        ens_arr[[m, t, j, i]] = (ens[[i, j, m]] * scale) as f32;
+                        let v = ens[[i, j, m]];
+                        ens_arr[[m, t, j, i]] =
+                            if sentinel == Some(v) { f32::NAN } else { (v * scale) as f32 };
                     }
                 }
             }
