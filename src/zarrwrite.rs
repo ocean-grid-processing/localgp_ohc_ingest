@@ -5,7 +5,7 @@
 //! + `gzip` codecs — gzip via flate2 is pure Rust and read natively by zarr-python/xarray.
 //!
 //! Layout per layer (see ../zarr_schema.md):
-//!   ohc_mean      (time,lat,lon)         f32, 1 chunk
+//!   ohc_mean      (time,lat,lon)         f64, 1 chunk
 //!   ohc_ensemble  (member,time,lat,lon)  f32, chunk (1,time,lat,lon) → one file per member
 //!   mask_flags    (lat,lon)              u8
 //!   etopo         (lat,lon)              f32
@@ -194,25 +194,28 @@ pub fn write_layer_store(
     write_array_single_chunk(&root, "ohc_mean", &data.ohc_mean.view(), &["time","lat","lon"],
         json!({"units":"J/m2","long_name":"ocean heat content (posterior mean)"}))?;
 
-    // ---- ohc_ensemble: shape (member,time,lat,lon), chunk (1,time,lat,lon) per member ----
-    let (nm, nt, nlat, nlon) = data.ohc_ensemble.dim();
-    let dir = root.join("ohc_ensemble");
-    fs::create_dir_all(&dir)?;
-    write_json(
-        &dir.join("zarr.json"),
-        &array_meta::<f32>(
-            &[nm, nt, nlat, nlon],
-            &[1, nt, nlat, nlon],
-            &["member", "time", "lat", "lon"],
-            json!({"units":"J/m2","long_name":"ocean heat content (conditional simulations)"}),
-        ),
-    )?;
-    for m in 0..nm {
-        let slab = data.ohc_ensemble.index_axis(Axis(0), m); // [time,lat,lon]
-        // chunk key c/<m>/0/0/0
-        let cdir = dir.join("c").join(m.to_string()).join("0").join("0");
-        fs::create_dir_all(&cdir)?;
-        fs::write(cdir.join("0"), chunk_bytes(&slab)?)?;
+    // ---- ohc_ensemble: (member,time,lat,lon), chunk (1,time,lat,lon) per member ----
+    // Omitted entirely for a mean-only store (ingested with --no-ensemble).
+    if let Some(ens) = &data.ohc_ensemble {
+        let (nm, nt, nlat, nlon) = ens.dim();
+        let dir = root.join("ohc_ensemble");
+        fs::create_dir_all(&dir)?;
+        write_json(
+            &dir.join("zarr.json"),
+            &array_meta::<f32>(
+                &[nm, nt, nlat, nlon],
+                &[1, nt, nlat, nlon],
+                &["member", "time", "lat", "lon"],
+                json!({"units":"J/m2","long_name":"ocean heat content (conditional simulations)"}),
+            ),
+        )?;
+        for m in 0..nm {
+            let slab = ens.index_axis(Axis(0), m); // [time,lat,lon]
+            // chunk key c/<m>/0/0/0
+            let cdir = dir.join("c").join(m.to_string()).join("0").join("0");
+            fs::create_dir_all(&cdir)?;
+            fs::write(cdir.join("0"), chunk_bytes(&slab)?)?;
+        }
     }
 
     Ok(root)

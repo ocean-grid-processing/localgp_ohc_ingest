@@ -36,11 +36,24 @@ pub struct RunConfig {
     pub latitude_range_to_keep: [f64; 2],
     /// basin ids to drop (land + marginal seas)
     pub basins_to_remove: Vec<i16>,
-    /// dir holding the FullField mean `.mat` files
+    /// uniform bathymetry floor (m): flag cells shallower than this for every layer
+    /// (`bed_above_floor`). `None` = no floor. WMO/GCOS product uses 300.
+    #[serde(default)]
+    pub bathy_floor_m: Option<f64>,
+    /// value in the mapping `.mat` that means "missing" → converted to NaN at ingest (so the
+    /// validity bits drop the cell), mirroring the original's `val2use_asNaN`. `None` = only NaN
+    /// is missing. WMO/GCOS uses 0.0 (absolute OHC is never 0 at a wet cell, so 0 is a safe
+    /// sentinel). Compared against the raw mapping value before the cp0·rho0 scaling.
+    #[serde(default)]
+    pub missing_sentinel: Option<f64>,
+    /// dir holding the FullField mean `.mat` files (may be omitted here and set via `--dir_mean`)
+    #[serde(default = "default_dir")]
     pub dir_mean: PathBuf,
-    /// dir holding the LocalCondSim ensemble `.mat` files
+    /// dir holding the LocalCondSim ensemble `.mat` files (or set via `--dir_ensemble`)
+    #[serde(default = "default_dir")]
     pub dir_ensemble: PathBuf,
-    /// where the zarr stores are written
+    /// where the zarr stores are written (or set via `--dir_out`)
+    #[serde(default = "default_dir")]
     pub dir_out: PathBuf,
     /// path to etopo60.cdf
     pub etopo_path: PathBuf,
@@ -55,6 +68,7 @@ pub struct RunConfig {
 fn default_cp0() -> f64 { crate::consts::CP0 }
 fn default_rho0() -> f64 { crate::consts::RHO0 }
 fn default_tag() -> String { "UNSET".into() }
+fn default_dir() -> PathBuf { PathBuf::from(".") }
 
 impl RunConfig {
     /// Constant defaults (current LocalGP conventions). The run tag and paths are
@@ -66,6 +80,8 @@ impl RunConfig {
             model_name: "SpaceTimeTrend".into(),
             latitude_range_to_keep: [-64.5, 64.5],
             basins_to_remove: vec![0, 5, 6, 7, 8, 9, 53],
+            bathy_floor_m: None,
+            missing_sentinel: None,
             dir_mean: PathBuf::from("."),
             dir_ensemble: PathBuf::from("."),
             dir_out: PathBuf::from("."),

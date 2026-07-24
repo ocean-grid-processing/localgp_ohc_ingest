@@ -1,14 +1,18 @@
 //! ohc_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --layer T-B --years Y|A:B --months M|A:B|M,M,...
+//!   ohc_ingest [config.toml] --tag NAME --layer T-B --years Y|A:B --months M|A:B|M,M,... [--no-ensemble]
 //!
 //! `--tag`, `--layer`, `--years`, `--months` are REQUIRED (one run = one layer over one time
 //! slice). Each may also be given via env (`OHC_TAG`, `OHC_LAYER`, `OHC_YEARS`, `OHC_MONTHS`);
 //! CLI wins. `--tag` is the run identifier and labels the output store + metadata.
+//! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
+//! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
 //! (`OHC_DIR_MEAN`, `OHC_DIR_ENSEMBLE`, `OHC_DIR_OUT`, `OHC_ETOPO`, `OHC_BASINMASK`) when no
-//! config is given.
+//! config is given. `--dir_mean`, `--dir_ensemble`, `--dir_out` override those directories on the
+//! command line (CLI wins over both config and env) — for munging paths per shell submission.
+//! The config may omit those three dirs entirely (they default to `.`) and rely on the flags.
 //!
 //! Examples:
 //!   ohc_ingest --layer 15-20 --years 2016 --months 8
@@ -30,14 +34,37 @@ struct Cli {
     layer: Option<LayerSpec>,
     years: Option<[i32; 2]>,
     months: Option<Vec<u32>>,
+    no_ensemble: bool,
+    dir_mean: Option<PathBuf>,
+    dir_ensemble: Option<PathBuf>,
+    dir_out: Option<PathBuf>,
 }
 
 fn parse_cli() -> Result<Cli> {
     let args: Vec<String> = env::args().skip(1).collect();
-    let mut cli = Cli { config_path: None, tag: None, layer: None, years: None, months: None };
+    let mut cli = Cli {
+        config_path: None, tag: None, layer: None, years: None, months: None,
+        no_ensemble: env::var_os("OHC_NO_ENSEMBLE").is_some(),
+        dir_mean: None, dir_ensemble: None, dir_out: None,
+    };
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--no-ensemble" => {
+                cli.no_ensemble = true;
+            }
+            "--dir_mean" => {
+                i += 1;
+                cli.dir_mean = Some(PathBuf::from(args.get(i).context("--dir_mean needs a value")?.clone()));
+            }
+            "--dir_ensemble" => {
+                i += 1;
+                cli.dir_ensemble = Some(PathBuf::from(args.get(i).context("--dir_ensemble needs a value")?.clone()));
+            }
+            "--dir_out" => {
+                i += 1;
+                cli.dir_out = Some(PathBuf::from(args.get(i).context("--dir_out needs a value")?.clone()));
+            }
             "--tag" => {
                 i += 1;
                 cli.tag = Some(args.get(i).context("--tag needs a value")?.clone());
@@ -105,6 +132,10 @@ fn resolve_slice(cli: &Cli) -> Result<Slice> {
 fn main() -> Result<()> {
     let cli = parse_cli()?;
     let mut cfg = load_run_config(&cli.config_path)?;
+    // CLI path overrides win over config.toml / env (handy for munging dirs per shell submission).
+    if let Some(p) = &cli.dir_mean { cfg.dir_mean = p.clone(); }
+    if let Some(p) = &cli.dir_ensemble { cfg.dir_ensemble = p.clone(); }
+    if let Some(p) = &cli.dir_out { cfg.dir_out = p.clone(); }
     cfg.run_tag = match &cli.tag {
         Some(t) => t.clone(),
         None => match env::var("OHC_TAG") {
@@ -143,13 +174,17 @@ fn main() -> Result<()> {
     let cell_area = gridmod::cell_area(&grid);
 
     let t0 = Instant::now();
-    eprintln!(">>> layer {} dbar", slice.layer.tag());
-    let data = ingest::ingest_layer(&cfg, &slice, &grid)
+    eprintln!(">>> layer {} dbar{}", slice.layer.tag(),
+        if cli.no_ensemble { " (mean-only, --no-ensemble)" } else { "" });
+    let data = ingest::ingest_layer(&cfg, &slice, &grid, cli.no_ensemble)
         .with_context(|| format!("ingesting layer {}", slice.layer.tag()))?;
     let (never, incomplete) = masks::compute_validity(&data.ohc_mean);
+    // Union the member NaN footprints (matches the original's mean∪members mask); None if mean-only.
+    let ens_incomplete = data.ohc_ensemble.as_ref().map(masks::compute_ensemble_incomplete);
     let flags = masks::build_flags(
         &grid, &slice.layer, &etopo, Some(&basin_id),
-        cfg.latitude_range_to_keep, &cfg.basins_to_remove, &never, &incomplete,
+        cfg.latitude_range_to_keep, &cfg.basins_to_remove, cfg.bathy_floor_m, &never, &incomplete,
+        ens_incomplete.as_ref(),
     )?;
     let store = zarrwrite::write_layer_store(
         &cfg, &slice, &grid, &data, &flags, &etopo, &basin_id, &cell_area,

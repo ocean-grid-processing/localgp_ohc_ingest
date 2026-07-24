@@ -17,8 +17,8 @@ writes a submission. This document defines the bits.
 CF attributes on the variable:
 
 ```
-flag_masks    = 1, 2, 4, 8, 16, 32
-flag_meanings = "bed_above_shallow bed_above_deep outside_latitude removed_basin never_estimated incomplete_timeseries"
+flag_masks    = 1, 2, 4, 8, 16, 32, 64, 128
+flag_meanings = "bed_above_shallow bed_above_deep outside_latitude removed_basin never_estimated incomplete_timeseries bed_above_floor ensemble_incomplete"
 ```
 
 ## Bits
@@ -31,25 +31,43 @@ flag_meanings = "bed_above_shallow bed_above_deep outside_latitude removed_basin
 | 3 | 8 | `removed_basin` | cell in a dropped basin (marginal / enclosed seas) | `basin_id ∈ remove-list` |
 | 4 | 16 | `never_estimated` | LocalGP produced no value in any month | `all t: ¬isfinite` |
 | 5 | 32 | `incomplete_timeseries` | valid in some months but not all | `(any t: ¬isfinite) ∧ ¬never_estimated` |
-| 6–7 | 64, 128 | (reserved) | | |
+| 6 | 64 | `bed_above_floor` | seafloor shallower than a fixed floor depth, applied uniformly to every layer | `etopo > −floor` |
+| 7 | 128 | `ensemble_incomplete` | some CondSim member is NaN-in-time here (the mean may be finite) | `∃ member, t: ¬isfinite` |
 
-Bits 0/1/4/5 are **physical / validity** reasons; bits 2/3 are **policy** reasons. Bits 4 and 5
+Bits 0/1/4/5/7 are **physical / validity** reasons; bits 2/3/6 are **policy** reasons. Bits 4 and 5
 together encode the temporal-validity state: neither set = always valid, bit 5 = sometimes
 valid, bit 4 = never valid. Per-timestep validity itself is not stored — it's `isfinite(data)`.
+
+`bed_above_floor` differs from `bed_above_deep`: the deep bit is per-layer (against that layer's
+own bottom edge), while the floor bit is a single depth applied to **all** layers alike. It is set
+only when `bathy_floor_m` is configured (`None` = off). The WMO/GCOS product uses a 300 m floor so
+every layer shares one open-ocean footprint (matches the original `max_pressure_to_keep = 300`).
+
+`ensemble_incomplete` is the member half of the original's mean∪members mask: `never`/`incomplete`
+carry the mean's NaNs, and this bit adds cells that only some CondSim members drop (the flaky deep
+layers). It is set from the ingested ensemble and is **unset** for a mean-only store (`--no-ensemble`),
+so honoring it never over-masks a store that has no members to union.
 
 ## Selecting cells
 
 "Fully usable" is "no bit set":
 
 ```
-USABLE = 0b00111111   (= 63)
+USABLE = 0b11111111   (= 255)
 keep = (mask_flags & USABLE) == 0
 ```
 
 Drop bits from the selector to relax a policy: a global (un-cropped) integral uses
 `USABLE & ~outside_latitude`; tolerating partial-depth cells drops `bed_above_deep`; including
-marginal seas drops `removed_basin`. `publish.py` ships two presets — `me4oh` honors only the
-physical bits (0,1,4,5), `wmo` honors all six.
+marginal seas drops `removed_basin`. `publish.py` ships two presets — `me4oh` honors the physical
+bits (0,1,4,5); `wmo` honors validity + `outside_latitude` + `removed_basin` + `bed_above_shallow`
++ `bed_above_floor` + `ensemble_incomplete`, but **not** `bed_above_deep`. The `bed_above_shallow`
+vs `bed_above_deep` split is deliberate: drop cells where the layer is *entirely* below the seabed
+(fully dry, `bed_above_shallow`), but keep *partial* cells where the seabed cuts through the layer
+(`bed_above_deep` off) — the continental-slope cells the original retains. Honoring
+`bed_above_shallow` also guarantees a deeper-topped layer's footprint is a subset of a
+shallower-topped one with the same bottom (e.g. `A(1800_1850) ⊆ A(700_1850)`), which the mapping's
+own NaNs don't always enforce.
 
 ## Sentinel (free correctness check)
 

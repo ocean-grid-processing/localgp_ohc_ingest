@@ -13,7 +13,11 @@ Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.
-  wmo             = all bits (adds outside_latitude, removed_basin) — our cropped product.
+  wmo             = validity + outside_latitude + removed_basin + bed_above_shallow +
+                    bed_above_floor (+ ensemble_incomplete) — our cropped product. Drops fully-dry
+                    cells (bed_above_shallow) and shelves shallower than the uniform floor, but
+                    KEEPS partial cells where the seabed cuts through the layer (bed_above_deep is
+                    NOT honored) — matching the original WMO/GCOS domain.
 
 --ensemble additionally writes the full conditional-simulation ensemble as a sibling file
   OHCENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
@@ -37,10 +41,20 @@ BITS = {
     "removed_basin": 8,
     "never_estimated": 16,
     "incomplete_timeseries": 32,
+    "bed_above_floor": 64,
+    "ensemble_incomplete": 128,
 }
 PRESETS = {
     "me4oh": ["never_estimated", "incomplete_timeseries", "bed_above_shallow", "bed_above_deep"],
-    "wmo": list(BITS),
+    # WMO/GCOS domain. Bathymetry: honor bed_above_shallow (drop cells where the layer is
+    # ENTIRELY below the seabed — fully dry, zero water) but NOT bed_above_deep (keep PARTIAL
+    # cells where the seabed cuts through the layer — they hold water and the original retains
+    # them). This keeps the continental-slope partial cells while excluding fully-dry cells the
+    # mapping sometimes leaves as values rather than NaN (the deepest layer, 1800_1850). Plus the
+    # uniform bathy floor. `ensemble_incomplete` reproduces the original's mean∪members mask
+    # (unset for --no-ensemble stores, so mean-only stays mean-only).
+    "wmo": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
+            "bed_above_shallow", "bed_above_floor", "ensemble_incomplete"],
 }
 TERA = 1e12
 
@@ -69,12 +83,22 @@ def main():
                     help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
     ap.add_argument("--ensemble", action="store_true",
                     help="also write the full ensemble as OHCENS_<...>.nc, DATA(MEMBER,LON,LAT,TIME)")
+    ap.add_argument("--dtype", default="float64", choices=["float32", "float64"],
+                    help="output dtype for DATA/DATA_SD (default float64; the mean is f64 in the "
+                         "store and the GCOS anomaly is a large-mean cancellation). The ensemble "
+                         "sibling stays float32.")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
     ds = xr.open_zarr(args.store, consolidated=False)  # decodes time -> datetime64
     g = ds.attrs
     product = args.product or g["mapped_fields_tag"]
+    has_ens = "ohc_ensemble" in ds.data_vars           # False for mean-only (--no-ensemble) stores
+    if args.ensemble and not has_ens:
+        raise SystemExit("--ensemble requested but %s has no ohc_ensemble "
+                         "(ingested with --no-ensemble)" % args.store)
+    if not has_ens and not args.no_uncertainty:
+        print("note: mean-only store (no ohc_ensemble) — writing DATA without DATA_SD")
 
     # --- collapse the selected mask bits to NaN ---
     mval = preset_mask_value(args.preset)
@@ -86,7 +110,7 @@ def main():
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
     # ddof=1 (sample standard deviation); this reads all ensemble members.
-    include_sd = not args.no_uncertainty
+    include_sd = not args.no_uncertainty and has_ens
     sd = (ds["ohc_ensemble"].std("member", ddof=1).where(~masked) / TERA) if include_sd else None
 
     # --- time -> days since 1900-01-01 ---
@@ -103,7 +127,7 @@ def main():
 
     # --- compliant dataset: DATA(LONGITUDE, LATITUDE, TIME) [+ optional DATA_SD] ---
     def to_lon_lat_time(da):
-        return da.transpose("lon", "lat", "time").values.astype("float32")
+        return da.transpose("lon", "lat", "time").values.astype(args.dtype)
 
     data_vars = {"DATA": (("LONGITUDE", "LATITUDE", "TIME"), to_lon_lat_time(data))}
     if include_sd:
@@ -147,7 +171,8 @@ def main():
 
     fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
     path = os.path.join(args.out, fname)
-    chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan)}
+    fill = getattr(np, args.dtype)(np.nan)
+    chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": fill}
     enc = {"DATA": dict(chunk_enc)}
     if include_sd:
         enc["DATA_SD"] = dict(chunk_enc)

@@ -14,7 +14,7 @@ FROM scratch AS bin
 COPY --from=build /app/target/x86_64-unknown-linux-musl/release/ohc_ingest /ohc_ingest
 
 # Build and extract the static binary to ./dist/ohc_ingest:
-#   docker build -f Dockerfile.static --target bin --output type=local,dest=dist ohc_pipeline/ohc_ingest
+#   docker image build -f Dockerfile.static --target bin --output type=local,dest=dist .
 #
 # Confirm it's static (expect "statically linked" / "not a dynamic executable"):
 #   file dist/ohc_ingest
