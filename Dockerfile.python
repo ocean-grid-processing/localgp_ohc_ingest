@@ -1,0 +1,4 @@
+# Python environment for cross-check and publish (scripts/verify_store.py and scripts/publish.py).
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir numpy scipy xarray "zarr>=3"

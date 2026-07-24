@@ -92,12 +92,15 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    // Validates the transpose + cp0·rho0 scaling on the single local month (Aug 2016),
-    // by running ingest over a 1-month config. Set OHC_TEST_DATA to the .mat dir.
+    // Validates the transpose + cp0·rho0 scaling on the single sample month (Aug 2016). The .mat
+    // ships in the crate under test_fixtures/, so this test always runs (no env needed);
+    // OHC_TEST_DATA overrides the directory for an out-of-tree copy.
     #[test]
     fn single_month_transpose_and_scale() {
         use crate::config::LayerSpec;
-        let Some(dir) = std::env::var_os("OHC_TEST_DATA").map(PathBuf::from) else { return };
+        let dir = std::env::var_os("OHC_TEST_DATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/test_fixtures")));
         let mut cfg = RunConfig::defaults();
         cfg.dir_mean = dir;
         let layer = LayerSpec { top: 15, bottom: 20 };

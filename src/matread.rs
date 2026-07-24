@@ -179,8 +179,12 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn data_dir() -> Option<PathBuf> {
-        std::env::var_os("OHC_TEST_DATA").map(PathBuf::from)
+    // The sample .mat ship in the crate under test_fixtures/, so these tests always run (no env
+    // needed). OHC_TEST_DATA overrides the directory for an out-of-tree copy.
+    fn data_dir() -> PathBuf {
+        std::env::var_os("OHC_TEST_DATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/test_fixtures")))
     }
 
     const MEAN: &str = "potentialTemperatureFullFieldSpaceTimeTrend_15_20_08_2016.mat";
@@ -188,7 +192,7 @@ mod tests {
 
     #[test]
     fn mean_grid_matches_reference() {
-        let Some(dir) = data_dir() else { return };
+        let dir = data_dir();
         let g = read_mean_grid(dir.join(MEAN)).unwrap();
         assert_eq!(g.dim(), (360, 180));
         let finite = g.iter().filter(|x| x.is_finite()).count();
@@ -200,7 +204,7 @@ mod tests {
 
     #[test]
     fn ensemble_shape_and_shared_footprint() {
-        let Some(dir) = data_dir() else { return };
+        let dir = data_dir();
         let e = read_ensemble(dir.join(ENS)).unwrap();
         assert_eq!(e.dim(), (360, 180, 100));
         // All 100 members share an identical NaN footprint (the key design assumption).

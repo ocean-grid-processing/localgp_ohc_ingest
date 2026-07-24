@@ -90,63 +90,34 @@ presets pick different subsets — notably `wmo` honors `bed_above_shallow` (ful
 *not* `bed_above_deep` (partial slope cells are kept). Full definitions, the exact preset subsets,
 the selector conventions, and the monotonic-bathymetry sentinel are in [`mask_spec.md`](mask_spec.md).
 
-## Build
+## Usage
 
-```bash
-cargo build --release          # native
-docker build -t ohc_ingest .   # container (pure Rust, no system deps)
+Here we enumerate and illustrate how to build, test and run the rust and python components in this repo, with examples and tables of options.
+
+### Ingest step: .mat -> .zarr, in rust
+
+#### Test
+
+Test locally from a bare rust container, in the root of this repo:
+
+```
+docker container run -w /app -v $(pwd):/app rust:1.88 cargo test --lib
 ```
 
-### Static binary for the cluster
+Note you need to download `basinmask_04.msk` into `data/`, or at least one of these tests will fail. Don't forget to do the same on your production cluster.
 
-For clusters with neither Docker nor Rust, build a fully static `x86_64-unknown-linux-musl`
-binary and copy the single file up (no libc/runtime deps):
+#### Build
+
+The rust ingestion script is meant to be easy to compile into a fully static binary `dist/ohc_ingest` that can be committed to this repo and checked out along with the slurm and config files for running on Blanca:
+
 
 ```bash
 docker build -f Dockerfile.static --target bin --output type=local,dest=dist .
-file dist/ohc_ingest          # → statically linked
-scp dist/ohc_ingest cluster:~/bin/
 ```
 
-## Example jobs (Slurm)
+#### Run
 
-The four pipeline steps each have a complete, runnable Slurm script in this directory — use them
-as the canonical run examples (edit the paths and `--mail-user` for your setup):
-
-| step | does | script | example job |
-|---|---|---|---|
-| create store | LocalGP `.mat` → zarr | `dist/ohc_ingest` | [`ohc_ingest.slurm`](ohc_ingest.slurm) |
-| validate store | zarr ↔ `.mat` | `scripts/verify_store.py` | [`verify_store.slurm`](verify_store.slurm) |
-| create submission | zarr → ME4OH `.nc` | `scripts/publish.py` | [`publish.slurm`](publish.slurm) |
-| validate submission | `.nc` ↔ `.mat` | `scripts/verify_publish.py` | [`verify_publish.slurm`](verify_publish.slurm) |
-
-The sections below explain each step's options; the `.slurm` files show a full invocation.
-
-## Run
-
-**One run processes exactly one layer.** The per-run slice is required; static constants +
-paths come from a `config.toml` (positional arg) or path env vars. To build the whole cube, run
-one invocation per layer (e.g. a scheduler job array) — there is deliberately no multi-layer
-mode, since each layer is an independent store.
-
-```bash
-./ohc_ingest config.toml --tag OP20260110 --layer 15-300 --years 2004:2025 --months 1:12
-
-# mean-only (skip LocalCondSim; omits ohc_ensemble) — for mean-only products like the GCOS
-# deliverable, or when the CondSim set is incomplete:
-./ohc_ingest config.toml --tag OP20260110 --layer 700-1000 --years 2004:2025 --months 1:12 --no-ensemble
-
-# keep the constants in config.toml but override the I/O dirs per submission:
-./ohc_ingest config.toml --tag OP20260110 --layer 15-20 --years 2004:2025 --months 1:12 \
-    --dir_mean /run/FullField --dir_ensemble /run/FullFieldLocalCondSim --dir_out /scratch/zarr
-```
-
-When run from a scheduler, pass `config.toml` explicitly and use **absolute paths** (inside it
-too) — a job's working directory is not guaranteed. The binary prints the resolved config + paths
-on startup, so a missing config is obvious. Complete cluster job:
-[`ohc_ingest.slurm`](ohc_ingest.slurm).
-
-## Configuration reference (Rust core)
+See [`ohc_ingest.slurm`](ohc_ingest.slurm) for a practical run example on blanca.
 
 Settings fall into three kinds by where they live:
 
@@ -157,15 +128,14 @@ Settings fall into three kinds by where they live:
   From a `config.toml` (positional arg), or built-in defaults when no config is given. Template:
   [`config.example.toml`](config.example.toml).
 
-**Precedence** — wherever a setting has more than one possible source, the order is
-**CLI flag → environment variable → `config.toml` → built-in default**, with two wrinkles:
+**Precedence** — wherever a setting has more than one possible source, the decending order of precedence is **CLI flag → environment variable → `config.toml` → built-in default**, with two wrinkles:
 
 1. The **path env vars are read only when no `config.toml` is passed** — a config file and the env
    don't mix (the config is taken as authoritative for everything it can hold).
 2. The **`--dir_*` CLI flags always win**, overriding the directory whether it came from config or
    env — the one hook for munging I/O paths per submission while keeping constants in one config.
 
-### Per-run slice — required (CLI flag, or env; CLI wins)
+##### Per-run slice — required (CLI flag, or env)
 
 | setting | CLI | env | example |
 |---|---|---|---|
@@ -174,7 +144,7 @@ Settings fall into three kinds by where they live:
 | years | `--years` | `OHC_YEARS` | `2016`, `2004:2025` |
 | months | `--months` | `OHC_MONTHS` | `8`, `1:3`, `1,6,12` |
 
-### Run options (CLI flag, or env)
+##### Run options (CLI flag, or env)
 
 | setting | CLI | env | default | effect |
 |---|---|---|---|---|
@@ -184,10 +154,10 @@ Settings fall into three kinds by where they live:
 | output dir | `--dir_out` | `OHC_DIR_OUT` ¹ | config / `.` | where the zarr store is written |
 
 ¹ path env vars apply **only when no `config.toml` is passed**; `--dir_*` flags override regardless.
-`--no-ensemble` is for mean-only products (e.g. the GCOS deliverable) or an incomplete CondSim set:
+`--no-ensemble` is for mean-only products or an incomplete CondSim set:
 `publish.py` then emits `DATA` without `DATA_SD`, and `--ensemble` on such a store errors.
 
-### Static config (`config.toml` key, or built-in default)
+##### Static config (`config.toml` key, or built-in default)
 
 No CLI or env for these except the three dirs above (and the two grid paths, via env in no-config
 mode). Keys marked **req** have no built-in default *when a `config.toml` is present* — the example
@@ -207,51 +177,24 @@ config sets them; in no-config mode the listed default applies.
 | `rho0` | `1030.0` | | OHC scale `cp0·rho0`, kg/m³ |
 | `dir_mean` / `dir_ensemble` / `dir_out` | `.` | | I/O directories (usually set per-run via the `--dir_*` flags above) |
 
-## Test
+### Pythonic publish (.zarr -> .nc) & crosschecks (.mat vs .zarr and .mat vs .nc)
 
-Unit tests carry ground-truth locked from one sample month/layer. The data-backed ones are
-gated on three env vars and skip silently if unset:
+After a .zarr store is formed, publish.py applies opinionated masking decisions and generates a .nc compliant with the ME4OH spec. Additionally, we validate this piece of the pipeline with two crosscheck scripts, that compare the contents of the .zarr store with the contents of the original .mat, and similarly compare the final .nc with the original .mat.
 
-- `OHC_ETOPO`, `OHC_BASINMASK` — parameter grids in `data/` (come along when the crate is mounted).
-- `OHC_TEST_DATA` — a directory holding **both** sample `.mat` in one place: the FullField mean
-  (`potentialTemperatureFullFieldSpaceTimeTrend_15_20_08_2016.mat`) and its LocalCondSim
-  ensemble.
+#### Environmnet
 
-Containerized run from the root of this repo (no custom image needed — the official `rust` image has the toolchain):
+The python environment for performing integrity crosschecks and publishing to an ME4OH-compliant .nc is described in `Dockerfile.python`; build and mount into this environment, or make an equivalent one in anaconda on CU's cluster for use with slurm.
 
-```bash
-docker container run --rm \
-  -v "$PWD":/app -w /app \
-  -v "$PWD/test_fixtures":/fixtures:ro \
-  -e OHC_TEST_DATA=/fixtures \
-  -e OHC_ETOPO=/app/data/etopo60.cdf \
-  -e OHC_BASINMASK=/app/data/basinmask_04.msk \
-  rust:1-bookworm \
-  cargo test
-```
+#### Run
 
-## Python edge (publish + verify)
-
-These scripts share one environment; build it once:
-
-```bash
-conda create -n ohc -c conda-forge python=3.12 "xarray>=2024.10" "zarr>=3" scipy numpy netCDF4
-# or, into an existing env:  pip install -r scripts/requirements-crosscheck.txt
-```
-
-### publish.py — make the ME4OH submission
+##### publish.py — make the ME4OH submission
 
 Projects a store to a compliant `.nc`: collapses the selected mask bits to NaN, converts
 J/m² → TJ/m² and the time axis to days-since-1900, and writes `DATA(LONGITUDE, LATITUDE, TIME)`
 (float64 by default) under the ME4OH filename. By default it also adds `DATA_SD` (ensemble 1σ —
-the protocol's "associated uncertainties, where available"), computed from `ohc_ensemble`.
+the protocol's "associated uncertainties, where available"), computed from `ohc_ensemble`. See [`publish.slurm`](publish.slurm) for a submission example.
 
-```bash
-python scripts/publish.py STORE.zarr --experiment B --product LocalGP --out submissions/
-# -> submissions/OHC_<Y0>_<Y1>_lev<low>_<high>_exp<X>_<product>.nc
-```
-
-Complete cluster job: [`publish.slurm`](publish.slurm).
+###### Script options:
 
 | option | default | effect |
 |---|---|---|
@@ -263,7 +206,7 @@ Complete cluster job: [`publish.slurm`](publish.slurm).
 | `--anomaly` | off | subtract the per-cell time mean before writing |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |
 | `--ensemble` | off | also write the full ensemble sibling `OHCENS_<...>.nc` (see below) |
-| `--dtype` | `float64` | dtype for `DATA`/`DATA_SD` — `float64` (the mean is f64 in the store, and the GCOS anomaly is a large-mean cancellation) or `float32`. The ensemble sibling stays f32 either way. |
+| `--dtype` | `float64` | dtype for `DATA`/`DATA_SD` — `float64` (the mean is f64 in the store, since the GCOS anomaly is a large-mean cancellation) or `float32`. The ensemble sibling stays f32 either way. |
 | `--out` | `.` | output directory |
 
 **Mask presets** (`--preset`): `me4oh` (default) honors only the physical/validity bits
@@ -274,8 +217,7 @@ latitude/basin-cropped product: it adds `outside_latitude`, `removed_basin`, `be
 `bed_above_deep` (partial continental-slope cells are kept). Exact bit subsets in
 [`mask_spec.md`](mask_spec.md).
 
-**Mean-only stores:** a store ingested with `--no-ensemble` has no `ohc_ensemble`; publish detects
-this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
+**Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `ohc_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
 
 `--ensemble` writes the full ensemble as a sibling `OHCENS_<...>.nc` with
 `DATA(MEMBER, LONGITUDE, LATITUDE, TIME)` — same mask, units, and time axis as the submission (but
@@ -283,18 +225,10 @@ always f32) — for downstream uses that derive per-member quantities before col
 It is not an ME4OH submission (distinct filename, extra dimension), so the assessment's `OHC_*.nc`
 discovery won't pick it up.
 
-### Verification (two independent round-trips against the `.mat`)
+##### Crosscheck verification (two independent round-trips against the `.mat`)
 
 Both use `scipy.io.loadmat` as an independent reader (not our Rust parser), so they're genuine
 oracles; both load sizeable arrays, so run them inside the job allocation.
-
-```bash
-# the store vs the upstream .mat (every grid point, all members):
-python scripts/verify_store.py   STORE.zarr     DIR_MEAN DIR_ENSEMBLE
-
-# the published .nc vs the upstream .mat (end-to-end pipeline):
-python scripts/verify_publish.py SUBMISSION.nc  DIR_MEAN DIR_ENSEMBLE [--no-sd] [--ensemble]
-```
 
 - **`verify_store.py`** — three positional args (`STORE.zarr DIR_MEAN DIR_ENSEMBLE`), no flags. It
   auto-detects a mean-only store and skips the ensemble check (then `DIR_ENSEMBLE` is unused).
@@ -309,29 +243,3 @@ precision (both sides cast; exact match expected). `verify_publish` adapts to th
 dtype — ~1e-12 for float64 (the default) and ~1e-6 for float32 (the float32 `/1e12` rounding) —
 with the float32 ensemble checks (`DATA_SD`, `OHCENS`) held to the looser float32 tolerance. A real
 bug (transpose flip, unit error, wrong month) is still caught.
-
-For a pinned, reproducible verify environment there is also `Dockerfile.crosscheck`:
-
-```bash
-docker image build -f Dockerfile.crosscheck -t ohc_verify .
-docker container run --rm -v /host/out:/out:ro \
-  -v /host/FullField:/in_mean:ro -v /host/FullFieldLocalCondSim:/in_ens:ro \
-  ohc_verify /out/ohc_<tag>_plev15_300.zarr /in_mean /in_ens
-```
-
-## Layout
-
-```
-ohc_ingest/
-├── src/                 Rust core: .mat + etopo + basinmask readers, masks, ingest, zarr writer
-├── scripts/             Python edge: publish.py, verify_store.py, verify_publish.py
-├── config.example.toml  constants + paths template
-├── *.slurm              example SLURM jobs, one per pipeline step
-├── data/                committed reference grids (etopo60.cdf, basinmask_04.msk) + provenance
-├── Dockerfile           runtime container
-├── Dockerfile.static    static musl binary for the cluster
-└── Dockerfile.crosscheck  pinned env for the verify scripts
-```
-
-Design notes: [`mask_spec.md`](mask_spec.md) (the mask bit band) and
-[`zarr_schema.md`](zarr_schema.md) (store layout).

@@ -200,14 +200,17 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    // Set OHC_ETOPO to the etopo60.cdf path (e.g. data/etopo60.cdf). Skipped if unset.
-    fn etopo_path() -> Option<PathBuf> {
-        std::env::var_os("OHC_ETOPO").map(PathBuf::from)
+    // etopo60.cdf ships in the crate under data/, so this test always runs (no env needed).
+    // OHC_ETOPO overrides the path for an out-of-tree copy.
+    fn etopo_path() -> PathBuf {
+        std::env::var_os("OHC_ETOPO")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/data/etopo60.cdf")))
     }
 
     #[test]
     fn etopo_matches_grid_and_reference() {
-        let Some(p) = etopo_path() else { return };
+        let p = etopo_path();
         let grid = GridDef::mapping();
         let e = read_etopo(p, &grid).unwrap();
         assert_eq!(e.dim(), (180, 360)); // [lat, lon]
