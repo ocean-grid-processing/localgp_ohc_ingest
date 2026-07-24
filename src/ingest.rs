@@ -5,9 +5,10 @@
 //! month). Our zarr chunks are per-member, so we accumulate the full layer and emit:
 //!   - `ohc_mean`     `[time, lat, lon]`          (the FullField posterior mean)
 //!   - `ohc_ensemble` `[member, time, lat, lon]`  (the 100 conditional simulations)
-//! Integrated temperature is converted to OHC (`* cp0 * rho0`) on the way in; NaNs are
-//! preserved; arrays are transposed from the `.mat`'s `[lon, lat]` order to `[lat, lon]`. f32 storage
-//! (~6.8 GB for 264 months × 100 members) — RAM bet on the cluster.
+//! Integrated temperature is converted to OHC (`* cp0 * rho0`) on the way in; NaNs — and any
+//! configured `missing_sentinel` value — are preserved/stored as NaN; arrays are transposed from
+//! the `.mat`'s `[lon, lat]` order to `[lat, lon]`. The mean is stored f64, the ensemble f32
+//! (~6.8 GB for 264 months × 100 members — the RAM bet on the cluster).
 
 use anyhow::{Context, Result};
 use ndarray::{Array3, Array4};
