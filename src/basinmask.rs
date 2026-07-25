@@ -144,14 +144,17 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    // Set OHC_BASINMASK to basinmask_04.msk. Skipped if unset.
-    fn path() -> Option<PathBuf> {
-        std::env::var_os("OHC_BASINMASK").map(PathBuf::from)
+    // basinmask_04.msk ships in the crate under data/, so this test always runs (no env needed).
+    // OHC_BASINMASK overrides the path for an out-of-tree copy.
+    fn path() -> PathBuf {
+        std::env::var_os("OHC_BASINMASK")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/data/basinmask_04.msk")))
     }
 
     #[test]
     fn basin_assignment_matches_reference() {
-        let Some(p) = path() else { return };
+        let p = path();
         let grid = GridDef::mapping();
         let b = read_basin_id(p, &grid).unwrap();
         assert_eq!(b.dim(), (180, 360));

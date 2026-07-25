@@ -15,8 +15,8 @@
 //! The config may omit those three dirs entirely (they default to `.`) and rely on the flags.
 //!
 //! Examples:
-//!   ohc_ingest --layer 15-20 --years 2016 --months 8
-//!   ohc_ingest config.toml --layer 300-700 --years 2004:2025 --months 1:12
+//!   ohc_ingest --layer 15_20 --years 2016 --months 8
+//!   ohc_ingest config.toml --layer 300_700 --years 2004:2025 --months 1:12
 //!
 //! To process many layers, run one invocation per layer (e.g. a scheduler job array).
 
