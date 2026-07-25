@@ -1,6 +1,6 @@
 # Static constants + paths for ohc_ingest (one per product/environment).
 # The per-run SLICE is on the command line and is required:
-#   ohc_ingest config.toml --tag OP20260110 --layer 15-20 --years 2016 --months 8
+#   ohc_ingest config.toml --tag OP20260110 --layer 15_20 --years 2016 --months 8
 # (one run processes exactly one layer; loop layers via your job scheduler.)
 # The run identifier comes from --tag / OHC_TAG, not this file.
 

@@ -12,16 +12,3 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 # Export stage: just the binary, so `docker build --output` drops it on the host.
 FROM scratch AS bin
 COPY --from=build /app/target/x86_64-unknown-linux-musl/release/ohc_ingest /ohc_ingest
-
-# Build and extract the static binary to ./dist/ohc_ingest:
-#   docker image build -f Dockerfile.static --target bin --output type=local,dest=dist .
-#
-# Confirm it's static (expect "statically linked" / "not a dynamic executable"):
-#   file dist/ohc_ingest
-#   ldd  dist/ohc_ingest
-#
-# Deploy and run on the cluster (no container needed):
-#   scp dist/ohc_ingest cluster:~/bin/
-#   OHC_DIR_MEAN=... OHC_DIR_ENSEMBLE=... OHC_DIR_OUT=... \
-#   OHC_ETOPO=.../etopo60.cdf OHC_BASINMASK=.../basinmask_04.msk \
-#     ./ohc_ingest --tag OP20260110 --layer 15-20 --years 2016 --months 8

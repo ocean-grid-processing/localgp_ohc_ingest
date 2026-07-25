@@ -1,0 +1,22 @@
+# Static constants + paths for ohc_ingest (one per product/environment).
+# The per-run SLICE is on the command line and is required:
+#   ohc_ingest config.toml --tag OP20260110 --layer 15-20 --years 2016 --months 8
+# (one run processes exactly one layer; loop layers via your job scheduler.)
+# The run identifier comes from --tag / OHC_TAG, not this file.
+
+var_name   = "potentialTemperature"
+model_name = "SpaceTimeTrend"
+
+latitude_range_to_keep = [-64.5, 64.5]
+basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
+bathy_floor_m = 300
+missing_sentinel = 0.0
+
+# Directory holding the per-layer LocalGP .mat output (adjust to your cluster paths).
+#dir_mean       = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/Results/FullField"
+#dir_ensemble   = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/Results/FullFieldLocalCondSim"
+#dir_out        = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/ohc_ingest"
+etopo_path     = "/scratch/alpine/wimi7695/me4oh/postprocessing/parameters/etopo60.cdf"
+basinmask_path = "/scratch/alpine/wimi7695/me4oh/postprocessing/parameters/basinmask_04.msk"
+
+# Optional (defaults shown): cp0 = 3989.244, rho0 = 1030.0
