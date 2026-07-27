@@ -2,17 +2,9 @@
 
 `ohc_ingest` turns LocalGP ocean-heat-content (OHC) mapping output into a clean, analysis-ready store, and then into an ME4OH-protocol submission.
 
-The pipeline has a Rust core and a thin Python edge:
-
-```
-LocalGP .mat  ──ohc_ingest (Rust)──▶  per-layer zarr store  ──publish.py──▶  ME4OH .nc submission
- (mean +                              (raw OHC + bit-band mask,                (DATA[, DATA_SD],
-  ensemble)                            nothing masked out)                      mask applied as NaN)
-```
-
 The Rust binary is deliberately pure-Rust (no C deps) so it builds to a single static binary
 for clusters with no Docker/Rust; all NetCDF work lives in the Python step, where libnetcdf is
-already available.
+already available. Validation is primarily via round-trip crosschecks that comapare outputs to inputs after the fact.
 
 ## How this reflects the ME4OH protocol
 
