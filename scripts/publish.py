@@ -7,7 +7,7 @@ selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days si
 and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
 
     python publish.py STORE.zarr --experiment B --product LocalGP \
-        [--preset me4oh|wmo] [--levels LOW,HIGH] [--anomaly] [--ensemble] [--out DIR]
+        [--preset me4oh|wmo] [--levels LOW,HIGH] [--ensemble] [--out DIR]
 
 Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
@@ -78,7 +78,6 @@ def main():
     ap.add_argument("--product", default=None, help="product name for the filename (default: run tag)")
     ap.add_argument("--preset", default="me4oh", choices=list(PRESETS))
     ap.add_argument("--levels", default=None, help="LOW,HIGH meters for the filename (default: store layer bounds)")
-    ap.add_argument("--anomaly", action="store_true", help="subtract the per-cell time mean before writing")
     ap.add_argument("--no-uncertainty", action="store_true",
                     help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
     ap.add_argument("--ensemble", action="store_true",
@@ -105,8 +104,6 @@ def main():
     masked = xr.DataArray((ds["mask_flags"].values.astype("uint8") & mval) != 0,
                           dims=("lat", "lon"))
     data = ds["ohc_mean"].where(~masked) / TERA        # [time, lat, lon], TJ/m^2
-    if args.anomaly:
-        data = data - data.mean("time")
 
     # --- ensemble 1-sigma (the protocol's "associated uncertainties, where available") ---
     # ddof=1 (sample standard deviation); this reads all ensemble members.

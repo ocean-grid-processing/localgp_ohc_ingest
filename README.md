@@ -195,7 +195,6 @@ the protocol's "associated uncertainties, where available"), computed from `ohc_
 | `--product` | store's `mapped_fields_tag` | product name in the filename |
 | `--preset` | `me4oh` | which mask bits collapse to NaN — `me4oh` or `wmo` (see below) |
 | `--levels LOW,HIGH` | store's layer bounds | override the filename's layer bounds (meters) |
-| `--anomaly` | off | subtract the per-cell time mean before writing |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |
 | `--ensemble` | off | also write the full ensemble sibling `OHCENS_<...>.nc` (see below) |
 | `--dtype` | `float64` | dtype for `DATA`/`DATA_SD` — `float64` (the mean is f64 in the store, since the GCOS anomaly is a large-mean cancellation) or `float32`. The ensemble sibling stays f32 either way. |
