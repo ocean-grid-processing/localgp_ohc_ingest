@@ -59,7 +59,7 @@ pub fn compute_validity(mean_stack: &Array3<f64>) -> (Array2<bool>, Array2<bool>
 /// the original's mean∪members mask (`msk |= isnan(sum(member,3))` over all members). The mean's
 /// own NaNs are already carried by `never`/`incomplete`; this adds the cells that only some
 /// members drop (the flaky deep layers). `None` in `build_flags` when ingested `--no-ensemble`.
-pub fn compute_ensemble_incomplete(ensemble: &Array4<f32>) -> Array2<bool> {
+pub fn compute_ensemble_incomplete(ensemble: &Array4<f64>) -> Array2<bool> {
     let (nm, _nt, nlat, nlon) = ensemble.dim();
     let mut inc = Array2::<bool>::from_elem((nlat, nlon), false);
     for m in 0..nm {
@@ -228,8 +228,8 @@ mod tests {
         // A member NaN at (t, lat, lon) marks that cell; a fully-finite column stays clear.
         let grid = GridDef::mapping();
         let (nlat, nlon) = (grid.nlat(), grid.nlon());
-        let mut ens = Array4::<f32>::from_elem((3, 4, nlat, nlon), 1.0); // 3 members, 4 timesteps
-        ens[[2, 1, 90, 5]] = f32::NAN;                                   // member 2, t=1, one cell
+        let mut ens = Array4::<f64>::from_elem((3, 4, nlat, nlon), 1.0); // 3 members, 4 timesteps
+        ens[[2, 1, 90, 5]] = f64::NAN;                                   // member 2, t=1, one cell
         let ei = compute_ensemble_incomplete(&ens);
         assert!(ei[[90, 5]]);
         assert!(!ei[[90, 6]]);

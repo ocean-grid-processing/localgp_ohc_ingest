@@ -7,8 +7,8 @@
 //!   - `ohc_ensemble` `[member, time, lat, lon]`  (the 100 conditional simulations)
 //! Integrated temperature is converted to OHC (`* cp0 * rho0`) on the way in; NaNs — and any
 //! configured `missing_sentinel` value — are preserved/stored as NaN; arrays are transposed from
-//! the `.mat`'s `[lon, lat]` order to `[lat, lon]`. The mean is stored f64, the ensemble f32
-//! (~6.8 GB for 264 months × 100 members — the RAM bet on the cluster).
+//! the `.mat`'s `[lon, lat]` order to `[lat, lon]`. Both mean and ensemble are stored f64
+//! (~13.7 GB for 264 months × 100 members — the RAM bet on the cluster).
 
 use anyhow::{Context, Result};
 use ndarray::{Array3, Array4};
@@ -20,11 +20,11 @@ pub struct LayerData {
     /// `[time, lat, lon]`, OHC J/m², NaN preserved. f64: the deliverable takes a large-mean
     /// anomaly (absolute OHC − baseline), so the mean is kept double all the way through.
     pub ohc_mean: Array3<f64>,
-    /// `[member, time, lat, lon]`, OHC J/m², NaN preserved. f32: only feeds ensemble spread
-    /// (`_sd`), where single precision is ample, and keeps the 100-member stack half the size.
-    /// `None` when ingested mean-only (`--no-ensemble`) — the CondSim files are not read and
-    /// `ohc_ensemble` is omitted from the store.
-    pub ohc_ensemble: Option<Array4<f32>>,
+    /// `[member, time, lat, lon]`, OHC J/m², NaN preserved. f64 (matches the mean): the ensemble
+    /// feeds the `_sd` spread and the downstream yearly/trend uncertainties, kept double so those
+    /// are exact rather than f32-limited. `None` when ingested mean-only (`--no-ensemble`) — the
+    /// CondSim files are not read and `ohc_ensemble` is omitted from the store.
+    pub ohc_ensemble: Option<Array4<f64>>,
 }
 
 /// Read every month of the slice's layer and assemble the member-major arrays.
@@ -50,7 +50,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
     let mut ohc_ensemble = if mean_only {
         None
     } else {
-        Some(Array4::<f32>::from_elem((nm, nt, nlat, nlon), f32::NAN))
+        Some(Array4::<f64>::from_elem((nm, nt, nlat, nlon), f64::NAN))
     };
 
     for (t, &(year, month)) in time.iter().enumerate() {
@@ -77,7 +77,7 @@ pub fn ingest_layer(cfg: &RunConfig, slice: &Slice, grid: &GridDef, mean_only: b
                     for i in 0..nlon {
                         let v = ens[[i, j, m]];
                         ens_arr[[m, t, j, i]] =
-                            if sentinel == Some(v) { f32::NAN } else { (v * scale) as f32 };
+                            if sentinel == Some(v) { f64::NAN } else { v * scale };
                     }
                 }
             }

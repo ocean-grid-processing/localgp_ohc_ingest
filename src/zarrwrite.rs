@@ -6,7 +6,7 @@
 //!
 //! Layout per layer (see ../zarr_schema.md):
 //!   ohc_mean      (time,lat,lon)         f64, 1 chunk
-//!   ohc_ensemble  (member,time,lat,lon)  f32, chunk (1,time,lat,lon) → one file per member
+//!   ohc_ensemble  (member,time,lat,lon)  f64, chunk (1,time,lat,lon) → one file per member
 //!   mask_flags    (lat,lon)              u8
 //!   etopo         (lat,lon)              f32
 //!   basin_id      (lat,lon)              i16
@@ -202,7 +202,7 @@ pub fn write_layer_store(
         fs::create_dir_all(&dir)?;
         write_json(
             &dir.join("zarr.json"),
-            &array_meta::<f32>(
+            &array_meta::<f64>(
                 &[nm, nt, nlat, nlon],
                 &[1, nt, nlat, nlon],
                 &["member", "time", "lat", "lon"],
