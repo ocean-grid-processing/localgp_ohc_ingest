@@ -42,16 +42,17 @@ The 101 big files map 1:1 onto LocalGP's output for the layer: one `FullField` m
 | array | dims | dtype | units | fill | chunk |
 |---|---|---|---|---|---|
 | `ohc_mean` | `(time, lat, lon)` | f64 | J/m² | NaN | whole array (1 chunk) |
-| `ohc_ensemble` | `(member, time, lat, lon)` | f32 | J/m² | NaN | `(1, time, lat, lon)` — 1 per member |
+| `ohc_ensemble` | `(member, time, lat, lon)` | f64 | J/m² | NaN | `(1, time, lat, lon)` — 1 per member |
 | `mask_flags` | `(lat, lon)` | u8 | — | — | 1 chunk |
 | `etopo` | `(lat, lon)` | f32 | m | NaN | 1 chunk |
 | `basin_id` | `(lat, lon)` | i16 | — | — | 1 chunk |
 | `cell_area` | `(lat, lon)` | f64 | m² | — | 1 chunk |
 
 `ohc_mean` is **f64**: downstream products (e.g. the GCOS deliverable) take a large-mean anomaly
-(absolute OHC − baseline), a cancellation that needs double precision. `ohc_ensemble` stays **f32**
-— it only feeds ensemble spread (`_sd`), where single precision is ample and halves the
-100-member footprint. `ohc_ensemble` is **absent** in a mean-only store (ingested `--no-ensemble`):
+(absolute OHC − baseline), a cancellation that needs double precision. `ohc_ensemble` is **f64**
+too — its yearly-spread and trend uncertainties feed the same cancellation-prone anomalies, so
+single precision would leave them a few percent off; the cost is a doubled (~13.7 GB) 100-member
+footprint. `ohc_ensemble` is **absent** in a mean-only store (ingested `--no-ensemble`):
 the CondSim files aren't read, and `publish.py` then emits `DATA` without `DATA_SD`.
 
 ### Coordinates
@@ -100,8 +101,8 @@ domain            = "lon 20.5..379.5E, lat -89.5..89.5N, 1deg"
 ## Ingest note: month-major in, member-major out
 
 LocalGP delivers one `.mat` per month (each `LocalCondSim` file holds all 100 members for that
-month), but the store is chunked per member. The ingest buffers a whole layer in RAM (~6.8 GB
-f32 for a 264-month record), reads each monthly file once, scatters its members into the buffer
+month), but the store is chunked per member. The ingest X
+f64 for a 264-month record), reads each monthly file once, scatters its members into the buffer
 (applying `cp0·rho0`), then writes the per-member chunks plus the ancillary grids.
 
 ## Not in the store

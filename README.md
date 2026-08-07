@@ -197,7 +197,6 @@ the protocol's "associated uncertainties, where available"), computed from `ohc_
 | `--levels LOW,HIGH` | store's layer bounds | override the filename's layer bounds (meters) |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |
 | `--ensemble` | off | also write the full ensemble sibling `OHCENS_<...>.nc` (see below) |
-| `--dtype` | `float64` | dtype for `DATA`/`DATA_SD` — `float64` (the mean is f64 in the store, since the GCOS anomaly is a large-mean cancellation) or `float32`. The ensemble sibling stays f32 either way. |
 | `--out` | `.` | output directory |
 
 **Mask presets** (`--preset`): `me4oh` (default) honors only the physical/validity bits
@@ -211,8 +210,8 @@ latitude/basin-cropped product: it adds `outside_latitude`, `removed_basin`, `be
 **Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `ohc_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
 
 `--ensemble` writes the full ensemble as a sibling `OHCENS_<...>.nc` with
-`DATA(MEMBER, LONGITUDE, LATITUDE, TIME)` — same mask, units, and time axis as the submission (but
-always f32) — for downstream uses that derive per-member quantities before collapsing to a spread.
+`DATA(MEMBER, LONGITUDE, LATITUDE, TIME)` — same mask, units (f64), and time axis as the
+submission — for downstream uses that derive per-member quantities before collapsing to a spread.
 It is not an ME4OH submission (distinct filename, extra dimension), so the assessment's `OHC_*.nc`
 discovery won't pick it up.
 
@@ -230,7 +229,7 @@ Complete cluster jobs: [`verify_store.slurm`](verify_store.slurm) and
 [`verify_publish.slurm`](verify_publish.slurm).
 
 **Tolerances** track the stored precision, not bit-for-bit. `verify_store` compares at float32
-precision (both sides cast; exact match expected). `verify_publish` adapts to the published `DATA`
-dtype — ~1e-12 for float64 (the default) and ~1e-6 for float32 (the float32 `/1e12` rounding) —
-with the float32 ensemble checks (`DATA_SD`, `OHCENS`) held to the looser float32 tolerance. A real
-bug (transpose flip, unit error, wrong month) is still caught.
+precision (both sides cast; exact match expected). `verify_publish` adapts to each variable's stored
+dtype — for float64 (the default) `DATA`/`OHCENS` match to ~1e-12 and `DATA_SD` to ~1e-9 (a std
+cancels more), and ~1e-6 for float32 (the float32 `/1e12` rounding). A real bug (transpose flip,
+unit error, wrong month) is still caught.

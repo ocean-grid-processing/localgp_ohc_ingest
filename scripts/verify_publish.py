@@ -11,10 +11,9 @@ J/m^2 -> TJ/m^2, time re-referenced to 1900). Uses scipy.io.loadmat as an indepe
 `publish.py --ensemble`, located by swapping the `OHC_` filename prefix) member-by-member
 against the `.mat` ensemble.
 
-The mean (DATA) is float64 end to end by default, so it matches a float64 recompute to ~1e-12;
-published with `--dtype float32` it holds only to ~1e-6 (the float32 /1e12 rounding, and 1e12
-isn't exactly representable in float32). The ensemble (DATA_SD, OHCENS) stays float32, so those
-checks use the looser float32 tolerance. The DATA tolerance adapts to the stored dtype.
+DATA, DATA_SD and OHCENS are all float64 end to end, so each matches a float64 recompute (DATA/OHCENS
+to ~1e-12, DATA_SD to ~1e-9 — a std cancels more). Tolerances adapt to each variable's stored dtype,
+so an older float32 file still checks (to ~1e-6, the float32 /1e12 rounding).
 Requires: xarray, numpy, scipy, netCDF4.
 """
 import argparse
@@ -25,27 +24,32 @@ import xarray as xr
 from scipy.io import loadmat
 
 TERA = 1e12
-SD_RTOL = 1e-3
-ENS_RTOL = 1e-6    # OHCENS members are float32; absorbs the float32 /1e12 rounding
+
+
+def _tol(dtype, f64_tol):
+    """The f64 tolerance if the stored dtype is float64, else the looser float32 one."""
+    return f64_tol if np.dtype(dtype) == np.float64 else 1e-6
 
 
 def expected_data(mat_lonlat, cp0, rho0, out_dtype):
     """Recompute the published DATA in float64 (ingest stores the mean f64) and cast to the
-    submission's stored dtype — float64 by default, float32 if published with --dtype float32."""
+    submission's stored dtype (float64; float32 only for an older f32 file)."""
     v = (mat_lonlat.astype(np.float64) * cp0 * rho0) / TERA   # J/m^2 -> TJ/m^2, f64
     return v.astype(out_dtype)
 
 
-def expected_sd(ens_lonlatmember, cp0, rho0):
-    s = np.float32(ens_lonlatmember * cp0 * rho0)      # [lon, lat, member] f32
-    sd = np.std(s, axis=2, ddof=1)                     # ensemble 1-sigma, f32
-    return np.float32(sd.astype(np.float64) / TERA)
+def expected_sd(ens_lonlatmember, cp0, rho0, out_dtype):
+    """Ensemble 1-sigma, recomputed in f64 (the store is f64 for mean and ensemble) and cast to the
+    stored DATA_SD dtype."""
+    s = ens_lonlatmember.astype(np.float64) * cp0 * rho0   # [lon, lat, member] J/m^2, f64
+    sd = np.std(s, axis=2, ddof=1) / TERA                  # 1-sigma, TJ/m^2, f64
+    return sd.astype(out_dtype)
 
 
-def expected_ens(ens_lonlatmember, cp0, rho0):
-    """Per-member published value: same cast chain as expected_data, kept 3-D."""
-    s = np.float32(ens_lonlatmember * cp0 * rho0)      # [lon, lat, member] f32
-    return np.float32(s.astype(np.float64) / TERA)     # [lon, lat, member] TJ/m^2
+def expected_ens(ens_lonlatmember, cp0, rho0, out_dtype):
+    """Per-member published value: ingest f64 -> publish astype(dtype), kept 3-D."""
+    v = (ens_lonlatmember.astype(np.float64) * cp0 * rho0) / TERA   # J/m^2 -> TJ/m^2, f64
+    return v.astype(out_dtype)
 
 
 def main():
@@ -73,6 +77,7 @@ def main():
     data_dtype = ds["DATA"].dtype
     data_rtol = 1e-12 if np.dtype(data_dtype) == np.float64 else 1e-6
     data_sd = ds["DATA_SD"].values if has_sd else None
+    sd_rtol = _tol(data_sd.dtype, 1e-9) if has_sd else None       # std has more cancellation than DATA
 
     data_ens = None
     if args.ensemble:
@@ -88,6 +93,7 @@ def main():
             raise SystemExit("error: %s DATA is %d-D, expected 4-D (MEMBER,LON,LAT,TIME)"
                              % (os.path.basename(ens_nc), eda.ndim))
         data_ens = eda.values   # [MEMBER, LON, LAT, TIME]
+        ens_rtol = _tol(data_ens.dtype, 1e-12)   # per-member values: same arithmetic, f64 roundoff
 
     days = np.round(ds["TIME"].values).astype("timedelta64[D]")
     dates = np.datetime64("1900-01-01") + days
@@ -119,21 +125,21 @@ def main():
             ens_path = os.path.join(args.dir_ensemble, stem % "LocalCondSim")
             ens_mat = loadmat(ens_path)["fullFieldGrid"]    # [lon, lat, member]
             if has_sd:
-                exp_s = expected_sd(ens_mat, cp0, rho0)
+                exp_s = expected_sd(ens_mat, cp0, rho0, data_sd.dtype)
                 got_s = data_sd[:, :, t]
                 finite = np.isfinite(got_s)
                 rel = np.abs(got_s[finite] - exp_s[finite]) / (np.abs(exp_s[finite]) + 1e-30)
                 mr = float(rel.max()) if finite.any() else 0.0
-                assert mr < SD_RTOL, "DATA_SD differs at %04d-%02d (max rel %g)" % (year, month, mr)
+                assert mr < sd_rtol, "DATA_SD differs at %04d-%02d (max rel %g)" % (year, month, mr)
                 worst_sd = max(worst_sd, mr)
             if args.ensemble:
-                exp_e = np.transpose(expected_ens(ens_mat, cp0, rho0), (2, 0, 1))  # [member,lon,lat]
+                exp_e = np.transpose(expected_ens(ens_mat, cp0, rho0, data_ens.dtype), (2, 0, 1))  # [member,lon,lat]
                 got_e = data_ens[:, :, :, t]                                       # [MEMBER,LON,LAT]
                 finite = np.isfinite(got_e)
                 if finite.any():
                     me = float(np.abs(got_e[finite] - exp_e[finite]).max())
                     scale = float(np.abs(exp_e[finite]).max())
-                    assert me <= ENS_RTOL * scale, \
+                    assert me <= ens_rtol * scale, \
                         "OHCENS differs at %04d-%02d (max %g, field scale %g)" % (year, month, me, scale)
                     worst_ens = max(worst_ens, me)
 

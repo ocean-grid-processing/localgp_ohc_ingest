@@ -82,10 +82,6 @@ def main():
                     help="skip the ensemble standard-deviation field DATA_SD (reads all members)")
     ap.add_argument("--ensemble", action="store_true",
                     help="also write the full ensemble as OHCENS_<...>.nc, DATA(MEMBER,LON,LAT,TIME)")
-    ap.add_argument("--dtype", default="float64", choices=["float32", "float64"],
-                    help="output dtype for DATA/DATA_SD (default float64; the mean is f64 in the "
-                         "store and the GCOS anomaly is a large-mean cancellation). The ensemble "
-                         "sibling stays float32.")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
@@ -124,7 +120,7 @@ def main():
 
     # --- compliant dataset: DATA(LONGITUDE, LATITUDE, TIME) [+ optional DATA_SD] ---
     def to_lon_lat_time(da):
-        return da.transpose("lon", "lat", "time").values.astype(args.dtype)
+        return da.transpose("lon", "lat", "time").values.astype("float64")
 
     data_vars = {"DATA": (("LONGITUDE", "LATITUDE", "TIME"), to_lon_lat_time(data))}
     if include_sd:
@@ -168,7 +164,7 @@ def main():
 
     fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
     path = os.path.join(args.out, fname)
-    fill = getattr(np, args.dtype)(np.nan)
+    fill = np.float64(np.nan)
     chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": fill}
     enc = {"DATA": dict(chunk_enc)}
     if include_sd:
@@ -179,7 +175,7 @@ def main():
 
     # --- optional: the full ensemble as a member-dimensioned sibling file ---
     if args.ensemble:
-        ens = (ds["ohc_ensemble"].where(~masked) / TERA).astype("float32")
+        ens = (ds["ohc_ensemble"].where(~masked) / TERA).astype("float64")
         ens = ens.transpose("member", "lon", "lat", "time").rename(
             {"member": "MEMBER", "lon": "LONGITUDE", "lat": "LATITUDE", "time": "TIME"})
         ens = ens.assign_coords(MEMBER=ds["member"].values,
@@ -202,7 +198,7 @@ def main():
         ename = "OHCENS_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
         epath = os.path.join(args.out, ename)
         nlon, nlat, ntime = len(ds["lon"]), len(ds["lat"]), len(days1900)
-        eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan),
+        eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float64(np.nan),
                          "chunksizes": (1, nlon, nlat, ntime)}}
         eds.to_netcdf(epath, engine="netcdf4", format="NETCDF4", encoding=eenc)
         print("wrote", epath, "(ensemble: %d members, preset=%s)"
