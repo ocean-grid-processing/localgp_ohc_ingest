@@ -8,7 +8,7 @@
 #SBATCH --output=%x.%j.out
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=katie.mills@colorado.edu
-#SBATCH --mem=32GB
+#SBATCH --mem=64GB
 #SBATCH --exclude=blanca-g6-u21
 
 module purge
@@ -17,5 +17,5 @@ conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
 python scripts/publish.py \
-  /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/ohc_ingest/ohc_OP20260112b_repro_plev${1}.zarr \
-  --experiment C --product LocalGP --preset wmo --out /pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/ohc_ingest
+  /scratch/alpine/wimi7695/validation/argo_ohc_Global_2004_2024_${1}/ohc_ohca_ohu_validation_plev${1}.zarr \
+  --experiment C --product LocalGP --preset wmo --out /scratch/alpine/wimi7695/validation/argo_ohc_Global_2004_2024_${1} --ensemble
