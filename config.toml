@@ -4,7 +4,7 @@
 # (one run processes exactly one layer; loop layers via your job scheduler.)
 # The run identifier comes from --tag / OHC_TAG, not this file.
 
-var_name   = "intTemp"
+var_name   = "potentialTemperature"
 model_name = "SpaceTimeTrend"
 
 latitude_range_to_keep = [-64.5, 64.5]
