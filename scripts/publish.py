@@ -6,8 +6,12 @@ compliant submission can only say "don't use this point" via NaN, so this step c
 selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days since 1900-01-01,
 and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
 
-    python publish.py STORE.zarr --experiment B --product LocalGP \
-        [--preset me4oh|wmo] [--levels LOW,HIGH] [--ensemble] [--out DIR]
+    python publish.py STORE.zarr --experiment B --tag OP20260127b \
+        [--provenance-link URL] [--product LocalGP] [--preset me4oh|wmo] \
+        [--levels LOW,HIGH] [--ensemble] [--out DIR]
+
+--tag is the run token in the filename (OHC_..._exp<E>_<tag>.nc) and the provenance_tag header
+attr, pointing at the provenance record. --product is now a descriptive header attr only.
 
 Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
@@ -71,11 +75,24 @@ def fmt_lev(x):
     return str(int(xf)) if xf == int(xf) else ("%g" % xf)
 
 
+def _sanitize_tag(tag):
+    """Strip all whitespace from a provenance tag; never lowercase or otherwise munge it — it must
+    match the provenance record char-for-char."""
+    return "".join(tag.split())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("store")
     ap.add_argument("--experiment", required=True)
-    ap.add_argument("--product", default=None, help="product name for the filename (default: run tag)")
+    ap.add_argument("--tag", required=True,
+                    help="provenance tag: the filename's run token AND the provenance_tag header attr "
+                         "(a pointer to the provenance record for this run)")
+    ap.add_argument("--provenance-link", default=None,
+                    help="URL/path to the provenance record; written to the provenance_link header attr")
+    ap.add_argument("--product", default=None,
+                    help="descriptive product name for the `product` header attr (default: the store's "
+                         "mapped_fields_tag). No longer in the filename — that slot is --tag.")
     ap.add_argument("--preset", default="me4oh", choices=list(PRESETS))
     ap.add_argument("--levels", default=None, help="LOW,HIGH meters for the filename (default: store layer bounds)")
     ap.add_argument("--no-uncertainty", action="store_true",
@@ -84,6 +101,7 @@ def main():
                     help="also write the full ensemble as OHCENS_<...>.nc, DATA(MEMBER,LON,LAT,TIME)")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
+    args.tag = _sanitize_tag(args.tag)
 
     ds = xr.open_zarr(args.store, consolidated=False)  # decodes time -> datetime64
     g = ds.attrs
@@ -157,12 +175,15 @@ def main():
         "cp0": g["cp0"], "rho0": g["rho0"],
         "mask_preset": args.preset,
         "mask_applied": " ".join(PRESETS[args.preset]),
+        "provenance_tag": args.tag,                    # run token; pointer to the provenance record
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    if args.provenance_link is not None:
+        out.attrs["provenance_link"] = args.provenance_link
     if include_sd:
         out.attrs["ensemble_size"] = int(ds.sizes["member"])
 
-    fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
+    fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, args.tag)
     path = os.path.join(args.out, fname)
     fill = np.float64(np.nan)
     chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": fill}
@@ -195,7 +216,7 @@ def main():
         eds.attrs["note"] = ("full conditional-simulation ensemble for per-member downstream "
                              "analysis; NOT a single-field ME4OH submission")
 
-        ename = "OHCENS_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, product)
+        ename = "OHCENS_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, args.tag)
         epath = os.path.join(args.out, ename)
         nlon, nlat, ntime = len(ds["lon"]), len(ds["lat"]), len(days1900)
         eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float64(np.nan),
