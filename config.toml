@@ -16,7 +16,7 @@ missing_sentinel = 0.0
 #dir_mean       = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/Results/FullField"
 #dir_ensemble   = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/Results/FullFieldLocalCondSim"
 #dir_out        = "/pl/active/giglio/localGP/OP20260127b/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_15_20/ohc_ingest"
-etopo_path     = "/scratch/alpine/wimi7695/me4oh/postprocessing/parameters/etopo60.cdf"
-basinmask_path = "/scratch/alpine/wimi7695/me4oh/postprocessing/parameters/basinmask_04.msk"
+etopo_path     = "/scratch/alpine/wimi7695/ohc_prod/params/etopo60.cdf"
+basinmask_path = "/scratch/alpine/wimi7695/ohc_prod/params/basinmask_04.msk"
 
 # Optional (defaults shown): cp0 = 3989.244, rho0 = 1030.0

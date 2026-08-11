@@ -15,9 +15,6 @@ module purge
 
 cd $SLURM_SUBMIT_DIR
 ./dist/ohc_ingest config.toml \
-  --dir_mean /scratch/alpine/wimi7695/gcos_validation/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/Results/FullField \
-  --dir_ensemble /scratch/alpine/wimi7695/gcos_validation/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1}/Results/FullFieldLocalCondSim \
-  --dir_out /scratch/alpine/wimi7695/gcos_validation/OP20260127b_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${1} \
-  --years 2004:2025 --months 1:12 --layer ${1} --tag gcos_validation_with_sd
+  --dir_mean $1 --dir_ensemble $2 --dir_out $3 --years 2004:2025 --months 1:12 --layer ${4} --tag $5
 
 
