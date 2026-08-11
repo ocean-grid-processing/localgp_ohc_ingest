@@ -89,6 +89,8 @@ Conventions       = "CF-1.10"
 title             = "LocalGP ocean heat content — <tag>, <top>-<bottom> dbar"
 source            = "LocalGP <model>; var=<var>; run=<tag>"
 mapped_fields_tag = "<tag>"
+provenance_tag    = "<tag>"        # run token (= store dir-name token); --tag, char-for-char
+provenance_link   = "<url|path>"   # pointer to the provenance record; --provenance-link
 var_name          = "<var>"        # e.g. potentialTemperature
 model_name        = "<model>"      # e.g. SpaceTimeTrend
 layer_top         = <top>          # dbar, shallow edge

@@ -28,6 +28,10 @@ pub struct RunConfig {
     /// run identifier, set per-run via `--tag` (this default is a placeholder)
     #[serde(default = "default_tag")]
     pub run_tag: String,
+    /// pointer to the provenance record for this run, set per-run via `--provenance-link`
+    /// (the `--tag` metadata document). Required at runtime; this default is a placeholder.
+    #[serde(default)]
+    pub provenance_link: String,
     /// e.g. "potentialTemperature"
     pub var_name: String,
     /// e.g. "SpaceTimeTrend"
@@ -76,6 +80,7 @@ impl RunConfig {
     pub fn defaults() -> Self {
         RunConfig {
             run_tag: default_tag(), // required via --tag
+            provenance_link: String::new(), // required via --provenance-link
             var_name: "potentialTemperature".into(),
             model_name: "SpaceTimeTrend".into(),
             latitude_range_to_keep: [-64.5, 64.5],
