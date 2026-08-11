@@ -16,8 +16,8 @@ there:
 - **Units:** OHC density in TJ/m², with `cp0 = 3989.244 J/kg/K`, `rho0 = 1030 kg/m³`.
 - **Time:** monthly, days since 1900-01-01.
 - **Submission file:** one NetCDF per layer, `DATA(LONGITUDE, LATITUDE, TIME)`, named
-  `OHC_<Y0>_<Y1>_lev<low>_<high>_exp<X>_<tag>.nc` (the trailing token is the publish `--tag`
-  provenance token; the descriptive product name lives in the `product` header attr).
+  `OHC_<Y0>_<Y1>_lev<low>_<high>_exp<X>_<tag>.nc` (the trailing token is the provenance tag,
+  inherited from the store; the product identity lives in the provenance record the tag points to).
 - **Mask:** the protocol's `ocean_mask` is "points not-NaN at all timesteps," so a submission
   communicates "don't use this cell" only via NaN. `publish.py` is where our richer internal
   mask collapses to that NaN convention.
@@ -132,7 +132,8 @@ Settings fall into three kinds by where they live:
 
 | setting | CLI | env | example |
 |---|---|---|---|
-| run tag | `--tag` | `OHC_TAG` | `OP20260110` — labels the store + all metadata |
+| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_plev<layer>.zarr` and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
+| provenance link | `--provenance-link` | `OHC_PROVENANCE_LINK` | URL/path to the provenance record; written to the `provenance_link` attr |
 | layer | `--layer` | `OHC_LAYER` | `15-300`, `300_700`, `700:1850` (integer dbar; exactly one; sep `-`/`_`/`:`) |
 | years | `--years` | `OHC_YEARS` | `2016`, `2004:2025` |
 | months | `--months` | `OHC_MONTHS` | `8`, `1:3`, `1,6,12` |
@@ -193,9 +194,8 @@ the protocol's "associated uncertainties, where available"), computed from `ohc_
 |---|---|---|
 | `STORE.zarr` (positional) | *(required)* | the input zarr store |
 | `--experiment` | *(required)* | ME4OH experiment letter (`A`/`B`/…) — the `exp<X>` filename token |
-| `--tag` | *(required)* | provenance tag: the **run token** in the filename (`OHC_…_exp<X>_<tag>.nc`, replacing the old product token) **and** the `provenance_tag` header attr (pointer to the provenance record). Distinct from the mat→zarr `--tag` that labels the store. |
-| `--provenance-link` | *(none)* | URL/path to the provenance record; written to the `provenance_link` header attr. |
-| `--product` | store's `mapped_fields_tag` | descriptive product name, written to the `product` header attr **only** — no longer in the filename (that slot is `--tag`). |
+| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`OHC_…_exp<X>_<tag>.nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
+| `--provenance-link` | *inherited from the store's `provenance_link`* | URL/path to the provenance record; written to the `provenance_link` header attr. Pass only to override. |
 | `--preset` | `me4oh` | which mask bits collapse to NaN — `me4oh` or `wmo` (see below) |
 | `--levels LOW,HIGH` | store's layer bounds | override the filename's layer bounds (meters) |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |

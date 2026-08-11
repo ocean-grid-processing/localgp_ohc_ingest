@@ -1,11 +1,15 @@
 //! ohc_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --layer T-B --years Y|A:B --months M|A:B|M,M,... [--no-ensemble]
+//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --layer T-B --years Y|A:B \
+//!       --months M|A:B|M,M,... [--no-ensemble]
 //!
-//! `--tag`, `--layer`, `--years`, `--months` are REQUIRED (one run = one layer over one time
-//! slice). Each may also be given via env (`OHC_TAG`, `OHC_LAYER`, `OHC_YEARS`, `OHC_MONTHS`);
-//! CLI wins. `--tag` is the run identifier and labels the output store + metadata.
+//! `--tag`, `--provenance-link`, `--layer`, `--years`, `--months` are REQUIRED (one run = one layer
+//! over one time slice). Each may also be given via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`,
+//! `OHC_LAYER`, `OHC_YEARS`, `OHC_MONTHS`); CLI wins. `--tag` is the run identifier: it names the
+//! output store (`ohc_<tag>_plev<layer>.zarr`) and is written to the store's `provenance_tag`
+//! attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
+//! `--provenance-link` points at that provenance record and is written to the `provenance_link` attr.
 //! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
 //! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
@@ -31,6 +35,7 @@ use ohc_ingest::{basinmask, grid as gridmod, ingest, masks, ncread, zarrwrite, G
 struct Cli {
     config_path: Option<String>,
     tag: Option<String>,
+    provenance_link: Option<String>,
     layer: Option<LayerSpec>,
     years: Option<[i32; 2]>,
     months: Option<Vec<u32>>,
@@ -43,7 +48,7 @@ struct Cli {
 fn parse_cli() -> Result<Cli> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut cli = Cli {
-        config_path: None, tag: None, layer: None, years: None, months: None,
+        config_path: None, tag: None, provenance_link: None, layer: None, years: None, months: None,
         no_ensemble: env::var_os("OHC_NO_ENSEMBLE").is_some(),
         dir_mean: None, dir_ensemble: None, dir_out: None,
     };
@@ -68,6 +73,11 @@ fn parse_cli() -> Result<Cli> {
             "--tag" => {
                 i += 1;
                 cli.tag = Some(args.get(i).context("--tag needs a value")?.clone());
+            }
+            "--provenance-link" => {
+                i += 1;
+                cli.provenance_link =
+                    Some(args.get(i).context("--provenance-link needs a value")?.clone());
             }
             "--layer" => {
                 i += 1;
@@ -141,6 +151,16 @@ fn main() -> Result<()> {
         None => match env::var("OHC_TAG") {
             Ok(v) => v,
             Err(_) => bail!("--tag is required (run identifier), e.g. --tag OP20260110"),
+        },
+    };
+    // Strip whitespace; never lowercase or otherwise munge — the tag must match the provenance
+    // record char-for-char (and it is the store's directory-name token).
+    cfg.run_tag = cfg.run_tag.split_whitespace().collect();
+    cfg.provenance_link = match &cli.provenance_link {
+        Some(l) => l.clone(),
+        None => match env::var("OHC_PROVENANCE_LINK") {
+            Ok(v) => v,
+            Err(_) => bail!("--provenance-link is required (pointer to the provenance record)"),
         },
     };
     let slice = resolve_slice(&cli)?;

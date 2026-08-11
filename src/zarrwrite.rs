@@ -147,7 +147,9 @@ pub fn write_layer_store(
         "title": format!("LocalGP ocean heat content — {}, {}-{} dbar",
                          cfg.run_tag, layer.top, layer.bottom),
         "source": format!("LocalGP {}; var={}; run={}", cfg.model_name, cfg.var_name, cfg.run_tag),
-        "mapped_fields_tag": cfg.run_tag,
+        "mapped_fields_tag": cfg.run_tag.clone(),
+        "provenance_tag": cfg.run_tag.clone(),          // run token; also the store dir-name token
+        "provenance_link": cfg.provenance_link.clone(), // pointer to the provenance record
         "var_name": cfg.var_name,
         "model_name": cfg.model_name,
         "layer_top": layer.top,
