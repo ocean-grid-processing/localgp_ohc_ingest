@@ -7,7 +7,7 @@ selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days si
 and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
 
     python publish.py STORE.zarr --experiment B \
-        [--tag OP20260127b] [--provenance-link URL] [--preset me4oh|wmo] \
+        [--tag OP20260127b] [--provenance-link URL] [--preset me4oh|wmo|wmo_wet] \
         [--levels LOW,HIGH] [--ensemble] [--out DIR]
 
 The provenance tag and link are inherited from the store (stamped by the ingest --tag /
@@ -19,10 +19,14 @@ Mask presets (see ../mask_spec.md):
                     bed_above_shallow, bed_above_deep) — submit the honest, maximal valid
                     field and let the assessment define the common domain.
   wmo             = validity + outside_latitude + removed_basin + bed_above_shallow +
-                    bed_above_floor (+ ensemble_incomplete) — our cropped product. Drops fully-dry
-                    cells (bed_above_shallow) and shelves shallower than the uniform floor, but
+                    bed_above_clip (+ ensemble_incomplete) — our cropped product. Drops fully-dry
+                    cells (bed_above_shallow) and shelves shallower than the uniform clip, but
                     KEEPS partial cells where the seabed cuts through the layer (bed_above_deep is
                     NOT honored) — matching the original WMO/GCOS domain.
+  wmo_wet         = the wmo crops but with bed_above_deep in place of bed_above_shallow — requires a
+                    whole cell wet, so the partial (continental-slope) cells drop too. deep
+                    supersedes shallow (the shallow=>deep sentinel); bed_above_clip is kept but
+                    currently redundant (deep already covers it).
 
 --ensemble additionally writes the full conditional-simulation ensemble as a sibling file
   OHCENS_<...>.nc with DATA(MEMBER, LONGITUDE, LATITUDE, TIME) — same mask, units, and time
@@ -46,7 +50,7 @@ BITS = {
     "removed_basin": 8,
     "never_estimated": 16,
     "incomplete_timeseries": 32,
-    "bed_above_floor": 64,
+    "bed_above_clip": 64,
     "ensemble_incomplete": 128,
 }
 PRESETS = {
@@ -56,10 +60,15 @@ PRESETS = {
     # cells where the seabed cuts through the layer — they hold water and the original retains
     # them). This keeps the continental-slope partial cells while excluding fully-dry cells the
     # mapping sometimes leaves as values rather than NaN (the deepest layer, 1800_1850). Plus the
-    # uniform bathy floor. `ensemble_incomplete` reproduces the original's mean∪members mask
+    # uniform bathy clip. `ensemble_incomplete` reproduces the original's mean∪members mask
     # (unset for --no-ensemble stores, so mean-only stays mean-only).
     "wmo": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
-            "bed_above_shallow", "bed_above_floor", "ensemble_incomplete"],
+            "bed_above_shallow", "bed_above_clip", "ensemble_incomplete"],
+    # Whole-cell-wet variant of wmo: bed_above_deep (drops the partial slope cells too) replaces
+    # bed_above_shallow, which it supersedes via the shallow=>deep sentinel. bed_above_clip is kept
+    # but currently redundant (bed_above_deep already covers every clipped cell).
+    "wmo_wet": ["never_estimated", "incomplete_timeseries", "outside_latitude", "removed_basin",
+                "bed_above_deep", "bed_above_clip", "ensemble_incomplete"],
 }
 TERA = 1e12
 

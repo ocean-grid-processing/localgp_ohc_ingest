@@ -16,13 +16,13 @@ pub const OUTSIDE_LATITUDE: u8 = 1 << 2;
 pub const REMOVED_BASIN: u8 = 1 << 3;
 pub const NEVER_ESTIMATED: u8 = 1 << 4; // LocalGP gave no value in any month
 pub const INCOMPLETE_TIMESERIES: u8 = 1 << 5; // valid some months, not all
-pub const BED_ABOVE_FLOOR: u8 = 1 << 6; // seabed shallower than a fixed floor depth, uniform across layers (policy)
+pub const BED_ABOVE_CLIP: u8 = 1 << 6; // seabed shallower than a fixed clip depth, uniform across layers (policy)
 pub const ENSEMBLE_INCOMPLETE: u8 = 1 << 7; // some CondSim member is NaN-in-time here (mean may be fine)
 
 /// CF `flag_masks` values, aligned with `FLAG_MEANINGS`.
 pub const FLAG_MASKS: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 pub const FLAG_MEANINGS: &str =
-    "bed_above_shallow bed_above_deep outside_latitude removed_basin never_estimated incomplete_timeseries bed_above_floor ensemble_incomplete";
+    "bed_above_shallow bed_above_deep outside_latitude removed_basin never_estimated incomplete_timeseries bed_above_clip ensemble_incomplete";
 
 /// "Fully usable" selector: no flags set.
 pub const USABLE: u8 = BED_ABOVE_SHALLOW
@@ -31,7 +31,7 @@ pub const USABLE: u8 = BED_ABOVE_SHALLOW
     | REMOVED_BASIN
     | NEVER_ESTIMATED
     | INCOMPLETE_TIMESERIES
-    | BED_ABOVE_FLOOR
+    | BED_ABOVE_CLIP
     | ENSEMBLE_INCOMPLETE;
 
 /// Temporal-validity summaries derived from the FullField mean stack `[time, lat, lon]`.
@@ -78,9 +78,9 @@ pub fn compute_ensemble_incomplete(ensemble: &Array4<f64>) -> Array2<bool> {
 /// `never`/`incomplete` come from [`compute_validity`]. Asserts the monotonic-bathymetry
 /// sentinel (never `bed_above_shallow` without `bed_above_deep`).
 ///
-/// `bathy_floor_m` (optional) sets `bed_above_floor` where the seabed is shallower than a fixed
-/// floor depth, applied uniformly to every layer regardless of its own bounds. `None` = no floor
-/// (the per-layer bed bits alone). Used by the WMO/GCOS product (floor = 300 m).
+/// `bathy_clip_m` (optional) sets `bed_above_clip` where the seabed is shallower than a fixed
+/// clip depth, applied uniformly to every layer regardless of its own bounds. `None` = no clip
+/// (the per-layer bed bits alone). Used by the WMO/GCOS product (clip = 300 m).
 ///
 /// `ens_incomplete` (optional, from [`compute_ensemble_incomplete`]) sets `ensemble_incomplete`
 /// where some CondSim member is NaN-in-time — the member half of the original's mean∪members
@@ -93,7 +93,7 @@ pub fn build_flags(
     basin_id: Option<&Array2<i16>>,
     latitude_range_to_keep: [f64; 2],
     basins_to_remove: &[i16],
-    bathy_floor_m: Option<f64>,
+    bathy_clip_m: Option<f64>,
     never: &Array2<bool>,
     incomplete: &Array2<bool>,
     ens_incomplete: Option<&Array2<bool>>,
@@ -126,9 +126,9 @@ pub fn build_flags(
             if bed > -bottom {
                 f |= BED_ABOVE_DEEP;
             }
-            if let Some(floor) = bathy_floor_m {
-                if bed > -floor {
-                    f |= BED_ABOVE_FLOOR;
+            if let Some(clip) = bathy_clip_m {
+                if bed > -clip {
+                    f |= BED_ABOVE_CLIP;
                 }
             }
             if outside_lat {
@@ -197,30 +197,30 @@ mod tests {
     }
 
     #[test]
-    fn bathy_floor_masks_shelves_uniformly() {
+    fn bathy_clip_masks_shelves_uniformly() {
         // A 15_20 layer whose own bed bits keep everything (deep ocean), plus two shelf cells at
-        // 150 m and 400 m. A 300 m floor must flag the 150 m cell but not the 400 m one, and it
+        // 150 m and 400 m. A 300 m clip must flag the 150 m cell but not the 400 m one, and it
         // must fire independently of the (unset) per-layer bed bits.
         let grid = GridDef::mapping();
         let mut etopo = Array2::<f64>::from_elem((grid.nlat(), grid.nlon()), -4000.0);
-        etopo[[90, 0]] = -150.0; // shallower than 300 → floor bit
-        etopo[[90, 1]] = -400.0; // deeper than 300 → no floor bit
+        etopo[[90, 0]] = -150.0; // shallower than 300 → clip bit
+        etopo[[90, 1]] = -400.0; // deeper than 300 → no clip bit
         let never = Array2::<bool>::from_elem((grid.nlat(), grid.nlon()), false);
         let incomplete = never.clone();
         let layer = LayerSpec { top: 15, bottom: 20 };
 
-        // No floor: neither cell flagged (both deeper than 20 m).
+        // No clip: neither cell flagged (both deeper than 20 m).
         let f0 = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], None, &never, &incomplete, None)
             .unwrap();
-        assert_eq!(count(&f0, BED_ABOVE_FLOOR), 0);
+        assert_eq!(count(&f0, BED_ABOVE_CLIP), 0);
 
-        // Floor = 300 m: only the 150 m cell, and it does not touch the per-layer bed bits.
+        // Clip = 300 m: only the 150 m cell, and it does not touch the per-layer bed bits.
         let f = build_flags(&grid, &layer, &etopo, None, [-64.5, 64.5], &[], Some(300.0), &never, &incomplete, None)
             .unwrap();
-        assert_eq!(f[[90, 0]] & BED_ABOVE_FLOOR, BED_ABOVE_FLOOR);
+        assert_eq!(f[[90, 0]] & BED_ABOVE_CLIP, BED_ABOVE_CLIP);
         assert_eq!(f[[90, 0]] & BED_ABOVE_DEEP, 0); // 150 m is deeper than the 20 m layer bottom
-        assert_eq!(f[[90, 1]] & BED_ABOVE_FLOOR, 0);
-        assert_eq!(count(&f, BED_ABOVE_FLOOR), 1);
+        assert_eq!(f[[90, 1]] & BED_ABOVE_CLIP, 0);
+        assert_eq!(count(&f, BED_ABOVE_CLIP), 1);
     }
 
     #[test]

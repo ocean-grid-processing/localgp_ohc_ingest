@@ -9,7 +9,7 @@ model_name = "SpaceTimeTrend"
 
 latitude_range_to_keep = [-64.5, 64.5]
 basins_to_remove       = [0, 5, 6, 7, 8, 9, 53]
-bathy_floor_m = 300
+bathy_clip_m = 300
 missing_sentinel = 0.0
 
 # Directory holding the per-layer LocalGP .mat output (adjust to your cluster paths).

@@ -203,7 +203,7 @@ fn main() -> Result<()> {
     let ens_incomplete = data.ohc_ensemble.as_ref().map(masks::compute_ensemble_incomplete);
     let flags = masks::build_flags(
         &grid, &slice.layer, &etopo, Some(&basin_id),
-        cfg.latitude_range_to_keep, &cfg.basins_to_remove, cfg.bathy_floor_m, &never, &incomplete,
+        cfg.latitude_range_to_keep, &cfg.basins_to_remove, cfg.bathy_clip_m, &never, &incomplete,
         ens_incomplete.as_ref(),
     )?;
     let store = zarrwrite::write_layer_store(

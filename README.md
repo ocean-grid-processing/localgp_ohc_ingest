@@ -75,12 +75,13 @@ to NaN in `publish.py`). The bits:
 | 3 | 8 | `removed_basin` | cell in a dropped basin (marginal / enclosed seas) |
 | 4 | 16 | `never_estimated` | LocalGP produced no value in any month |
 | 5 | 32 | `incomplete_timeseries` | valid in some months but not all |
-| 6 | 64 | `bed_above_floor` | seafloor shallower than a fixed floor depth, applied uniformly to every layer (set only when `bathy_floor_m` is configured) |
+| 6 | 64 | `bed_above_clip` | seafloor shallower than a fixed clip depth, applied uniformly to every layer (set only when `bathy_clip_m` is configured) |
 | 7 | 128 | `ensemble_incomplete` | some CondSim member is NaN-in-time here even if the mean is finite (unset for a `--no-ensemble` store) |
 
-Bits 0/1/4/5/7 are physical/validity reasons; bits 2/3/6 are policy reasons. `publish.py`'s two
+Bits 0/1/4/5/7 are physical/validity reasons; bits 2/3/6 are policy reasons. `publish.py`'s
 presets pick different subsets — notably `wmo` honors `bed_above_shallow` (fully-dry cells) but
-*not* `bed_above_deep` (partial slope cells are kept). Full definitions, the exact preset subsets,
+*not* `bed_above_deep` (partial slope cells are kept), while `wmo_wet` honors `bed_above_deep`
+(whole cell wet) and drops those partials. Full definitions, the exact preset subsets,
 the selector conventions, and the monotonic-bathymetry sentinel are in [`mask_spec.md`](mask_spec.md).
 
 ## Usage
@@ -165,7 +166,7 @@ config sets them; in no-config mode the listed default applies.
 | `basins_to_remove` | `[0, 5, 6, 7, 8, 9, 53]` | req | basin ids dropped → the `removed_basin` bit |
 | `etopo_path` | `etopo60.cdf` | req | bathymetry grid; env `OHC_ETOPO` in no-config mode |
 | `basinmask_path` | `basinmask_04.msk` | req | basin table; env `OHC_BASINMASK` in no-config mode |
-| `bathy_floor_m` | *(none = off)* | | uniform floor depth (m) → the `bed_above_floor` bit; WMO/GCOS uses `300.0` |
+| `bathy_clip_m` | *(none = off)* | | uniform clip depth (m) → the `bed_above_clip` bit; WMO/GCOS uses `300.0` |
 | `missing_sentinel` | *(none = off)* | | raw mapping value treated as missing → NaN at ingest; WMO/GCOS uses `0.0` |
 | `cp0` | `3989.244` | | OHC scale `cp0·rho0`, J/(kg·K) |
 | `rho0` | `1030.0` | | OHC scale `cp0·rho0`, kg/m³ |
@@ -205,9 +206,11 @@ the protocol's "associated uncertainties, where available"), computed from `ohc_
 **Mask presets** (`--preset`): `me4oh` (default) honors only the physical/validity bits
 (`never_estimated`, `incomplete_timeseries`, `bed_above_shallow`, `bed_above_deep`) — the honest,
 maximal valid field, letting the assessment define the common domain. `wmo` is our
-latitude/basin-cropped product: it adds `outside_latitude`, `removed_basin`, `bed_above_floor`, and
+latitude/basin-cropped product: it adds `outside_latitude`, `removed_basin`, `bed_above_clip`, and
 `ensemble_incomplete`, and — deliberately — honors `bed_above_shallow` (fully-dry cells) but **not**
-`bed_above_deep` (partial continental-slope cells are kept). Exact bit subsets in
+`bed_above_deep` (partial continental-slope cells are kept). `wmo_wet` is the same crops but honors
+`bed_above_deep` in place of `bed_above_shallow`, requiring a whole cell wet (partials drop too).
+Exact bit subsets in
 [`mask_spec.md`](mask_spec.md).
 
 **Mean-only stores:** a store produced by the rust with `--no-ensemble` has no `ohc_ensemble`; publish detects this, writes `DATA` without `DATA_SD` (with a note), and `--ensemble` on such a store is an error.
