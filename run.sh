@@ -3,7 +3,7 @@ do
   meandir=/scratch/alpine/wimi7695/ohc_prod/potential_temperature/OP20260507/${layer}/OP20260507_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${layer}/Results/FullField
   ensembledir=/scratch/alpine/wimi7695/ohc_prod/potential_temperature/OP20260507/${layer}/OP20260507_potentialTemperature_-89.5S_89.5N_20.5W_379.5E_2004_2025_${layer}/Results/FullFieldLocalCondSim
   outputdir=/scratch/alpine/wimi7695/ohc_prod/results
-  tag=prod_260810
+  tag=prod_260824
   declare ingest=$(sbatch --parsable ohc_ingest.slurm $meandir $ensembledir $outputdir $layer $tag)
   sbatch --dependency afterok:$ingest verify_store.slurm $outputdir $meandir $ensembledir $tag $layer
   declare publish=$(sbatch --parsable --dependency afterok:$ingest publish.slurm $outputdir $tag $layer)
