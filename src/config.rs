@@ -6,7 +6,7 @@
 //! processes exactly one layer; batching across layers is the job scheduler's job.
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -23,8 +23,10 @@ impl LayerSpec {
     }
 }
 
-/// Static constants + paths for a run (everything except the per-run slice; see `Slice`).
-#[derive(Debug, Clone, Deserialize)]
+/// Static constants + paths for a run (everything except the per-run slice; see `Slice`). The whole
+/// resolved struct is cold-serialized into the store's `run_config` provenance attr, so every field
+/// here — set anywhere in the precedence chain, or left at its default — is recorded verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunConfig {
     /// run identifier, set per-run via `--tag` (this default is a placeholder)
     #[serde(default = "default_tag")]
@@ -33,6 +35,10 @@ pub struct RunConfig {
     /// (the `--tag` metadata document). Required at runtime; this default is a placeholder.
     #[serde(default)]
     pub provenance_link: String,
+    /// link to the exact ohc_ingest code (a commit or release URL), set per-run via `--code-version`.
+    /// Required at runtime; this default is a placeholder.
+    #[serde(default)]
+    pub code_version: String,
     /// e.g. "potentialTemperature"
     pub var_name: String,
     /// e.g. "SpaceTimeTrend"
@@ -82,6 +88,7 @@ impl RunConfig {
         RunConfig {
             run_tag: default_tag(), // required via --tag
             provenance_link: String::new(), // required via --provenance-link
+            code_version: String::new(), // required via --code-version
             var_name: "potentialTemperature".into(),
             model_name: "SpaceTimeTrend".into(),
             latitude_range_to_keep: [-64.5, 64.5],
@@ -277,6 +284,22 @@ pub fn parse_layer(s: &str) -> Result<LayerSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_config_cold_serializes_all_fields() {
+        // The provenance block is the whole resolved struct — every field lands, defaults included.
+        let mut cfg = RunConfig::defaults();
+        cfg.code_version = "https://github.com/argovis/ohc_ingest/commit/abc123".into();
+        let json = serde_json::to_string(&cfg).unwrap();
+        for key in [
+            "run_tag", "provenance_link", "code_version", "var_name", "model_name",
+            "latitude_range_to_keep", "basins_to_remove", "bathy_clip_m", "missing_sentinel",
+            "dir_mean", "dir_ensemble", "dir_out", "etopo_path", "basinmask_path", "cp0", "rho0",
+        ] {
+            assert!(json.contains(key), "run_config missing {key}: {json}");
+        }
+        assert!(json.contains("abc123"));
+    }
 
     #[test]
     fn parse_layer_one_layer_only() {

@@ -16,4 +16,4 @@ module load anaconda/2023.09
 conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
-python scripts/publish.py ${1}/ohc_${2}_plev${3}.zarr --experiment C --preset wmo_wet --out ${1} --ensemble
+python scripts/publish.py ${1}/ohc_${2}_plev${3}.zarr --experiment C --preset wmo_wet --out ${1} --ensemble --code-version ${4}

@@ -28,6 +28,12 @@ use crate::GridDef;
 
 const GZIP_LEVEL: u32 = 5;
 
+/// This pipeline step's identity, used to namespace its provenance attrs
+/// (`<STAGE>_run_config` / `_run_facts` / `_code_version`). Fixed regardless of the binary name, so a
+/// future rename doesn't move the keys. Downstream steps roll every `*_run_config` etc. forward and
+/// add their own — so each step's block accretes without collisions, even across fan-ins.
+const STAGE: &str = "localgp_ingest";
+
 /// Trait for the small set of element types we serialize, with their zarr v3 names + fill.
 trait ZElem: Copy {
     const DTYPE: &'static str;
@@ -124,6 +130,27 @@ fn write_array_single_chunk<T: ZElem, D: Dimension>(
     Ok(())
 }
 
+/// The per-run derived facts (everything not in `RunConfig`): the discovered axis, the layer, the
+/// ensemble presence/size, and the grid — assembled from the objects the run actually used, so what
+/// is stamped can't drift from what ran.
+fn run_facts_value(slice: &Slice, grid: &GridDef, n_members: Option<usize>) -> Value {
+    let members = match n_members {
+        Some(n) => Value::from(n as u64),
+        None => Value::Null,
+    };
+    json!({
+        "layer_top": slice.layer.top,
+        "layer_bottom": slice.layer.bottom,
+        "year_min": slice.years[0],
+        "year_max": slice.years[1],
+        "n_timesteps": slice.time_axis().len() as u64,
+        "ensemble": !members.is_null(),
+        "n_members": members,
+        "grid_nlat": grid.nlat() as u64,
+        "grid_nlon": grid.nlon() as u64,
+    })
+}
+
 /// Write the per-layer zarr store.
 #[allow(clippy::too_many_arguments)]
 pub fn write_layer_store(
@@ -142,14 +169,20 @@ pub fn write_layer_store(
 
     // ---- group metadata ----
     let (time_days, (y0, m0)) = slice.time_days_since_start();
-    let group_attrs = json!({
+    // Provenance blocks: the whole resolved config (cold-serialized) plus the derived run facts, both
+    // pretty-printed JSON strings so they travel unchanged into the downstream netCDF attrs.
+    let n_members = data.ohc_ensemble.as_ref().map(|e| e.shape()[0]);
+    let run_config_json = serde_json::to_string_pretty(cfg).context("serializing run_config")?;
+    let run_facts_json = serde_json::to_string_pretty(&run_facts_value(slice, grid, n_members))
+        .context("serializing run_facts")?;
+    let mut group_attrs = json!({
         "Conventions": "CF-1.10",
         "title": format!("LocalGP ocean heat content — {}, {}-{} dbar",
                          cfg.run_tag, layer.top, layer.bottom),
         "source": format!("LocalGP {}; var={}; run={}", cfg.model_name, cfg.var_name, cfg.run_tag),
         "mapped_fields_tag": cfg.run_tag.clone(),
-        "provenance_tag": cfg.run_tag.clone(),          // run token; also the store dir-name token
-        "provenance_link": cfg.provenance_link.clone(), // pointer to the provenance record
+        "provenance_tag": cfg.run_tag.clone(),          // global run token (shared, inherited downstream)
+        "provenance_link": cfg.provenance_link.clone(), // global: pointer to this run's documentation
         "var_name": cfg.var_name,
         "model_name": cfg.model_name,
         "layer_top": layer.top,
@@ -158,6 +191,13 @@ pub fn write_layer_store(
         "rho0": cfg.rho0,
         "domain": "lon 20.5..379.5E, lat -89.5..89.5N, 1deg",
     });
+    // Stage-namespaced local provenance — keyed off STAGE so a binary rename doesn't move them, and
+    // so downstream steps can roll every `*_run_config` / `_run_facts` / `_code_version` forward as-is.
+    if let Some(obj) = group_attrs.as_object_mut() {
+        obj.insert(format!("{STAGE}_code_version"), Value::String(cfg.code_version.clone()));
+        obj.insert(format!("{STAGE}_run_config"), Value::String(run_config_json));
+        obj.insert(format!("{STAGE}_run_facts"), Value::String(run_facts_json));
+    }
     write_json(
         &root.join("zarr.json"),
         &json!({ "zarr_format": 3, "node_type": "group", "attributes": group_attrs }),
@@ -221,4 +261,32 @@ pub fn write_layer_store(
     }
 
     Ok(root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::LayerSpec;
+
+    #[test]
+    fn run_facts_capture_axis_layer_and_ensemble() {
+        let slice = Slice { layer: LayerSpec { top: 15, bottom: 20 }, years: [2004, 2005] };
+        let grid = GridDef::mapping();
+
+        let facts = run_facts_value(&slice, &grid, Some(100));
+        assert_eq!(facts["layer_top"].as_i64(), Some(15));
+        assert_eq!(facts["layer_bottom"].as_i64(), Some(20));
+        assert_eq!(facts["year_min"].as_i64(), Some(2004));
+        assert_eq!(facts["year_max"].as_i64(), Some(2005));
+        assert_eq!(facts["n_timesteps"].as_u64(), Some(24)); // two whole years
+        assert_eq!(facts["ensemble"].as_bool(), Some(true));
+        assert_eq!(facts["n_members"].as_u64(), Some(100));
+        assert_eq!(facts["grid_nlat"].as_u64(), Some(grid.nlat() as u64));
+        assert_eq!(facts["grid_nlon"].as_u64(), Some(grid.nlon() as u64));
+
+        // mean-only: ensemble off, member count null
+        let mean_only = run_facts_value(&slice, &grid, None);
+        assert_eq!(mean_only["ensemble"].as_bool(), Some(false));
+        assert!(mean_only["n_members"].is_null());
+    }
 }

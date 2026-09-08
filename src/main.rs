@@ -1,16 +1,21 @@
 //! ohc_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --layer T-B [--no-ensemble]
+//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --code-version URL --layer T-B [--no-ensemble]
 //!
-//! `--tag`, `--provenance-link`, `--layer` are REQUIRED (one run = one layer). Each may also be given
-//! via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`, `OHC_LAYER`); CLI wins. The time axis is autodetected
+//! `--tag`, `--provenance-link`, `--code-version`, `--layer` are REQUIRED (one run = one layer). Each
+//! may also be given via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`, `OHC_CODE_VERSION`, `OHC_LAYER`); CLI
+//! wins. The time axis is autodetected
 //! from the mapping files present in `dir_mean` (and, with the ensemble, `dir_ensemble`): every whole
 //! calendar year found, validated for gaps (a missing month, or a mean/ensemble mismatch, is a hard
 //! error). `--tag` is the run identifier: it names the output
 //! store (`ohc_<tag>_plev<layer>.zarr`) and is written to the store's `provenance_tag` attr
 //! (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
-//! `--provenance-link` points at that provenance record and is written to the `provenance_link` attr.
+//! `--provenance-link` points at that record (this run's documentation) → `provenance_link` attr;
+//! `--code-version` links the exact ohc_ingest code (a commit/release URL) → `localgp_ingest_code_version`.
+//! The store also carries `localgp_ingest_run_config` (the whole resolved config, cold-serialized) and
+//! `localgp_ingest_run_facts` (the discovered axis, layer, ensemble size, grid) as pretty-JSON-string
+//! attrs — this step's local provenance, namespaced so downstream steps roll it forward untouched.
 //! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
 //! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
 //! Static constants + paths come from `config.toml`, or from the defaults + path env vars
@@ -37,6 +42,7 @@ struct Cli {
     config_path: Option<String>,
     tag: Option<String>,
     provenance_link: Option<String>,
+    code_version: Option<String>,
     layer: Option<LayerSpec>,
     no_ensemble: bool,
     dir_mean: Option<PathBuf>,
@@ -47,7 +53,7 @@ struct Cli {
 fn parse_cli() -> Result<Cli> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut cli = Cli {
-        config_path: None, tag: None, provenance_link: None, layer: None,
+        config_path: None, tag: None, provenance_link: None, code_version: None, layer: None,
         no_ensemble: env::var_os("OHC_NO_ENSEMBLE").is_some(),
         dir_mean: None, dir_ensemble: None, dir_out: None,
     };
@@ -77,6 +83,11 @@ fn parse_cli() -> Result<Cli> {
                 i += 1;
                 cli.provenance_link =
                     Some(args.get(i).context("--provenance-link needs a value")?.clone());
+            }
+            "--code-version" => {
+                i += 1;
+                cli.code_version =
+                    Some(args.get(i).context("--code-version needs a value")?.clone());
             }
             "--layer" => {
                 i += 1;
@@ -137,6 +148,13 @@ fn main() -> Result<()> {
         None => match env::var("OHC_PROVENANCE_LINK") {
             Ok(v) => v,
             Err(_) => bail!("--provenance-link is required (pointer to the provenance record)"),
+        },
+    };
+    cfg.code_version = match &cli.code_version {
+        Some(v) => v.clone(),
+        None => match env::var("OHC_CODE_VERSION") {
+            Ok(v) => v,
+            Err(_) => bail!("--code-version is required (link to the ohc_ingest commit/release)"),
         },
     };
     let layer = resolve_layer(&cli)?;
