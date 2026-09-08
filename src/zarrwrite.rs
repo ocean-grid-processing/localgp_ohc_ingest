@@ -170,10 +170,11 @@ pub fn write_layer_store(
     // ---- group metadata ----
     let (time_days, (y0, m0)) = slice.time_days_since_start();
     // Provenance blocks: the whole resolved config (cold-serialized) plus the derived run facts, both
-    // pretty-printed JSON strings so they travel unchanged into the downstream netCDF attrs.
+    // compact JSON strings — one line each, so they read cleanly in `ncdump -h` (pretty-printing
+    // there collapses to `\n`-littered noise) and travel unchanged into the downstream netCDF attrs.
     let n_members = data.ohc_ensemble.as_ref().map(|e| e.shape()[0]);
-    let run_config_json = serde_json::to_string_pretty(cfg).context("serializing run_config")?;
-    let run_facts_json = serde_json::to_string_pretty(&run_facts_value(slice, grid, n_members))
+    let run_config_json = serde_json::to_string(cfg).context("serializing run_config")?;
+    let run_facts_json = serde_json::to_string(&run_facts_value(slice, grid, n_members))
         .context("serializing run_facts")?;
     let mut group_attrs = json!({
         "Conventions": "CF-1.10",

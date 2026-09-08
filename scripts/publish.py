@@ -217,8 +217,9 @@ def main():
     resolved_cfg = dict(vars(args))                    # every resolved flag, no schema to maintain
     resolved_cfg["tag"] = tag                          # effective values (inherited-or-overridden)
     resolved_cfg["provenance_link"] = prov_link
+    compact = dict(separators=(",", ":"), default=str)     # one-line JSON, clean in `ncdump -h`
     out.attrs["%s_code_version" % STAGE] = args.code_version
-    out.attrs["%s_run_config" % STAGE] = json.dumps(resolved_cfg, indent=2, default=str)
+    out.attrs["%s_run_config" % STAGE] = json.dumps(resolved_cfg, **compact)
     out.attrs["%s_run_facts" % STAGE] = json.dumps({
         "period": "%d_%d" % (y0, y1),
         "layer_m": "%s_%s" % (low, high),
@@ -232,7 +233,7 @@ def main():
         "n_timesteps": int(len(days1900)),
         "grid_nlon": int(len(ds["lon"])), "grid_nlat": int(len(ds["lat"])),
         "source_store": os.path.abspath(args.store),
-    }, indent=2, default=str)
+    }, **compact)
 
     fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, tag)
     path = os.path.join(args.out, fname)

@@ -113,7 +113,8 @@ roll forward untouched through later steps (each step copies every `*_run_config
 used, whatever its origin — flag, env, `config.toml`, or built-in default — stamped after precedence
 collapses). `…_run_facts` is the per-run detail that isn't in the config: `layer_top`/`layer_bottom`,
 `year_min`/`year_max`, `n_timesteps`, `ensemble` (bool) and `n_members`, `grid_nlat`/`grid_nlon`. Both
-are pretty-printed JSON **strings** so they carry unchanged into the downstream netCDF attrs.
+are compact (one-line) JSON **strings** — so they read as a single clean line in `ncdump -h` and carry
+unchanged into the downstream netCDF attrs.
 
 ## Ingest note: month-major in, member-major out
 

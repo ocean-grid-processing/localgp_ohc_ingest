@@ -14,7 +14,7 @@
 //! `--provenance-link` points at that record (this run's documentation) → `provenance_link` attr;
 //! `--code-version` links the exact ohc_ingest code (a commit/release URL) → `localgp_ingest_code_version`.
 //! The store also carries `localgp_ingest_run_config` (the whole resolved config, cold-serialized) and
-//! `localgp_ingest_run_facts` (the discovered axis, layer, ensemble size, grid) as pretty-JSON-string
+//! `localgp_ingest_run_facts` (the discovered axis, layer, ensemble size, grid) as compact JSON-string
 //! attrs — this step's local provenance, namespaced so downstream steps roll it forward untouched.
 //! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
 //! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
