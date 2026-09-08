@@ -129,15 +129,21 @@ Settings fall into three kinds by where they live:
 2. The **`--dir_*` CLI flags always win**, overriding the directory whether it came from config or
    env — the one hook for munging I/O paths per submission while keeping constants in one config.
 
-##### Per-run slice — required (CLI flag, or env)
+##### Per-run layer — required (CLI flag, or env)
 
 | setting | CLI | env | example |
 |---|---|---|---|
 | run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_plev<layer>.zarr` and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
 | provenance link | `--provenance-link` | `OHC_PROVENANCE_LINK` | URL/path to the provenance record; written to the `provenance_link` attr |
 | layer | `--layer` | `OHC_LAYER` | `15-300`, `300_700`, `700:1850` (integer dbar; exactly one; sep `-`/`_`/`:`) |
-| years | `--years` | `OHC_YEARS` | `2016`, `2004:2025` |
-| months | `--months` | `OHC_MONTHS` | `8`, `1:3`, `1,6,12` |
+
+##### Time axis — autodetected (no flag)
+
+The run's year range is discovered from the mapping files present in `dir_mean` (and, with the
+ensemble, `dir_ensemble`) for the given layer. LocalGP writes whole calendar years, so the discovered
+months must tile every year `1..=12` with no gap; a missing month, a partial trailing year, or a
+mean/ensemble axis mismatch is a **hard error** naming the holes. The discovered `Ymin..=Ymax` is
+echoed in the run banner.
 
 ##### Run options (CLI flag, or env)
 

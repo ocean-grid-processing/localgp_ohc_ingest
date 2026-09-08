@@ -15,6 +15,6 @@ module purge
 
 cd $SLURM_SUBMIT_DIR
 ./dist/ohc_ingest config.toml \
-  --dir_mean $1 --dir_ensemble $2 --dir_out $3 --years 2004:2025 --months 1:12 --layer ${4} --tag $5 --provenance-link https://github.com/argovis/ohc_ingest/releases/tag/$5
+  --dir_mean $1 --dir_ensemble $2 --dir_out $3 --layer ${4} --tag $5 --provenance-link https://github.com/argovis/ohc_ingest/releases/tag/$5
 
 

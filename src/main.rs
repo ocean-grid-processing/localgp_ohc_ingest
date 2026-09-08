@@ -1,14 +1,15 @@
 //! ohc_ingest driver — processes exactly one layer per run.
 //!
 //! Usage:
-//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --layer T-B --years Y|A:B \
-//!       --months M|A:B|M,M,... [--no-ensemble]
+//!   ohc_ingest [config.toml] --tag NAME --provenance-link URL --layer T-B [--no-ensemble]
 //!
-//! `--tag`, `--provenance-link`, `--layer`, `--years`, `--months` are REQUIRED (one run = one layer
-//! over one time slice). Each may also be given via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`,
-//! `OHC_LAYER`, `OHC_YEARS`, `OHC_MONTHS`); CLI wins. `--tag` is the run identifier: it names the
-//! output store (`ohc_<tag>_plev<layer>.zarr`) and is written to the store's `provenance_tag`
-//! attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
+//! `--tag`, `--provenance-link`, `--layer` are REQUIRED (one run = one layer). Each may also be given
+//! via env (`OHC_TAG`, `OHC_PROVENANCE_LINK`, `OHC_LAYER`); CLI wins. The time axis is autodetected
+//! from the mapping files present in `dir_mean` (and, with the ensemble, `dir_ensemble`): every whole
+//! calendar year found, validated for gaps (a missing month, or a mean/ensemble mismatch, is a hard
+//! error). `--tag` is the run identifier: it names the output
+//! store (`ohc_<tag>_plev<layer>.zarr`) and is written to the store's `provenance_tag` attr
+//! (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
 //! `--provenance-link` points at that provenance record and is written to the `provenance_link` attr.
 //! `--no-ensemble` (or `OHC_NO_ENSEMBLE`) ingests the mean only — skips the LocalCondSim files
 //! and omits `ohc_ensemble` from the store (for mean-only products, or incomplete CondSim sets).
@@ -19,8 +20,8 @@
 //! The config may omit those three dirs entirely (they default to `.`) and rely on the flags.
 //!
 //! Examples:
-//!   ohc_ingest --layer 15_20 --years 2016 --months 8
-//!   ohc_ingest config.toml --layer 300_700 --years 2004:2025 --months 1:12
+//!   ohc_ingest --layer 15_20
+//!   ohc_ingest config.toml --layer 300_700
 //!
 //! To process many layers, run one invocation per layer (e.g. a scheduler job array).
 
@@ -29,7 +30,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use ohc_ingest::config::{parse_layer, parse_months, parse_years, LayerSpec, RunConfig, Slice};
+use ohc_ingest::config::{parse_layer, LayerSpec, RunConfig, Slice};
 use ohc_ingest::{basinmask, grid as gridmod, ingest, masks, ncread, zarrwrite, GridDef};
 
 struct Cli {
@@ -37,8 +38,6 @@ struct Cli {
     tag: Option<String>,
     provenance_link: Option<String>,
     layer: Option<LayerSpec>,
-    years: Option<[i32; 2]>,
-    months: Option<Vec<u32>>,
     no_ensemble: bool,
     dir_mean: Option<PathBuf>,
     dir_ensemble: Option<PathBuf>,
@@ -48,7 +47,7 @@ struct Cli {
 fn parse_cli() -> Result<Cli> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut cli = Cli {
-        config_path: None, tag: None, provenance_link: None, layer: None, years: None, months: None,
+        config_path: None, tag: None, provenance_link: None, layer: None,
         no_ensemble: env::var_os("OHC_NO_ENSEMBLE").is_some(),
         dir_mean: None, dir_ensemble: None, dir_out: None,
     };
@@ -83,14 +82,6 @@ fn parse_cli() -> Result<Cli> {
                 i += 1;
                 cli.layer = Some(parse_layer(args.get(i).context("--layer needs a value")?)?);
             }
-            "--years" => {
-                i += 1;
-                cli.years = Some(parse_years(args.get(i).context("--years needs a value")?)?);
-            }
-            "--months" => {
-                i += 1;
-                cli.months = Some(parse_months(args.get(i).context("--months needs a value")?)?);
-            }
             s if s.starts_with("--") => bail!("unknown flag {s}"),
             s => cli.config_path = Some(s.to_string()),
         }
@@ -114,29 +105,14 @@ fn load_run_config(config_path: &Option<String>) -> Result<RunConfig> {
     }
 }
 
-fn resolve_slice(cli: &Cli) -> Result<Slice> {
-    let layer = match cli.layer {
-        Some(l) => l,
+fn resolve_layer(cli: &Cli) -> Result<LayerSpec> {
+    match cli.layer {
+        Some(l) => Ok(l),
         None => match env::var("OHC_LAYER") {
-            Ok(v) => parse_layer(&v)?,
+            Ok(v) => parse_layer(&v),
             Err(_) => bail!("--layer is required (one layer per run), e.g. --layer 15-20"),
         },
-    };
-    let years = match cli.years {
-        Some(y) => y,
-        None => match env::var("OHC_YEARS") {
-            Ok(v) => parse_years(&v)?,
-            Err(_) => bail!("--years is required, e.g. --years 2016 or --years 2004:2025"),
-        },
-    };
-    let months = match &cli.months {
-        Some(m) => m.clone(),
-        None => match env::var("OHC_MONTHS") {
-            Ok(v) => parse_months(&v)?,
-            Err(_) => bail!("--months is required, e.g. --months 8 or --months 1:12"),
-        },
-    };
-    Ok(Slice { layer, years, months })
+    }
 }
 
 fn main() -> Result<()> {
@@ -163,19 +139,10 @@ fn main() -> Result<()> {
             Err(_) => bail!("--provenance-link is required (pointer to the provenance record)"),
         },
     };
-    let slice = resolve_slice(&cli)?;
+    let layer = resolve_layer(&cli)?;
     let grid = GridDef::mapping();
 
-    eprintln!(
-        "Run {}: layer {} dbar, years {}..={}, months {:?}, {} timestep(s)",
-        cfg.run_tag,
-        slice.layer.tag(),
-        slice.years[0],
-        slice.years[1],
-        slice.months,
-        slice.time_axis().len(),
-    );
-
+    // Print the paths first, so a wrong dir is visible in context if the discovery below errors.
     match &cli.config_path {
         Some(p) => eprintln!("config: {p}"),
         None => eprintln!("config: none — using built-in defaults + env vars"),
@@ -185,6 +152,22 @@ fn main() -> Result<()> {
     eprintln!("  dir_out      = {}", cfg.dir_out.display());
     eprintln!("  etopo        = {}", cfg.etopo_path.display());
     eprintln!("  basinmask    = {}", cfg.basinmask_path.display());
+
+    // The time axis is discovered from the mapping files, not declared: whole calendar years, gaps
+    // are fatal, and (with the ensemble) mean and members must cover the same axis.
+    let years = cfg
+        .discover_years(&layer, cli.no_ensemble)
+        .with_context(|| format!("discovering the time axis for layer {}", layer.tag()))?;
+    let slice = Slice { layer, years };
+
+    eprintln!(
+        "Run {}: layer {} dbar, years {}..={} (autodetected), {} timestep(s)",
+        cfg.run_tag,
+        slice.layer.tag(),
+        slice.years[0],
+        slice.years[1],
+        slice.time_axis().len(),
+    );
 
     eprintln!("Loading ancillary grids…");
     let etopo = ncread::read_etopo(&cfg.etopo_path, &grid)
