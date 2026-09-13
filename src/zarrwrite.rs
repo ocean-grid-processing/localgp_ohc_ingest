@@ -164,7 +164,7 @@ pub fn write_layer_store(
     cell_area: &Array2<f64>,
 ) -> Result<PathBuf> {
     let layer = &slice.layer;
-    let root = cfg.store_path(layer);
+    let root = cfg.store_path(layer, slice.years);
     fs::create_dir_all(&root)?;
 
     // ---- group metadata ----

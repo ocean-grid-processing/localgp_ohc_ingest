@@ -49,7 +49,7 @@ Full provenance, versions, and citations are in [`data/README.md`](data/README.m
 
 ## Output (the zarr store)
 
-`ohc_<tag>_plev<top>_<bottom>.zarr`, containing:
+`ohc_<tag>_<Ymin>_<Ymax>_plev<top>_<bottom>.zarr` (the years are the discovered data span), containing:
 
 - `ohc_mean` `(time, lat, lon)` — the posterior-mean OHC, J/m², NaN preserved.
 - `ohc_ensemble` `(member, time, lat, lon)` — the 100 conditional simulations, chunked one
@@ -133,7 +133,7 @@ Settings fall into three kinds by where they live:
 
 | setting | CLI | env | example |
 |---|---|---|---|
-| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_plev<layer>.zarr` and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
+| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr` (years = discovered data span) and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
 | provenance link | `--provenance-link` | `OHC_PROVENANCE_LINK` | URL/path to this run's documentation; written to the `provenance_link` attr |
 | code version | `--code-version` | `OHC_CODE_VERSION` | URL to the exact ohc_ingest code (commit/release); written to the `localgp_ingest_code_version` attr |
 | layer | `--layer` | `OHC_LAYER` | `15-300`, `300_700`, `700:1850` (integer dbar; exactly one; sep `-`/`_`/`:`) |

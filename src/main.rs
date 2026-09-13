@@ -9,7 +9,8 @@
 //! from the mapping files present in `dir_mean` (and, with the ensemble, `dir_ensemble`): every whole
 //! calendar year found, validated for gaps (a missing month, or a mean/ensemble mismatch, is a hard
 //! error). `--tag` is the run identifier: it names the output
-//! store (`ohc_<tag>_plev<layer>.zarr`) and is written to the store's `provenance_tag` attr
+//! store (`ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`, the years being the discovered data span) and is
+//! written to the store's `provenance_tag` attr
 //! (whitespace-stripped, never lowercased — must match the provenance record char-for-char).
 //! `--provenance-link` points at that record (this run's documentation) → `provenance_link` attr;
 //! `--code-version` links the exact ohc_ingest code (a commit/release URL) → `localgp_ingest_code_version`.

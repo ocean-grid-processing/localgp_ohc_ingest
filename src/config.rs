@@ -124,10 +124,13 @@ impl RunConfig {
         dir.join(fname)
     }
 
-    /// zarr store directory for a layer.
-    pub fn store_path(&self, layer: &LayerSpec) -> PathBuf {
-        self.dir_out
-            .join(format!("ohc_{}_plev{}.zarr", self.run_tag, layer.tag()))
+    /// zarr store directory for a layer. `years` is the discovered `[Ymin, Ymax]` data span, so the
+    /// store name carries the years it covers: `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`.
+    pub fn store_path(&self, layer: &LayerSpec, years: [i32; 2]) -> PathBuf {
+        self.dir_out.join(format!(
+            "ohc_{}_{}_{}_plev{}.zarr",
+            self.run_tag, years[0], years[1], layer.tag()
+        ))
     }
 
     /// Fixed filename stem for a layer's monthly files: `{prefix}_{top}_{bottom}_`. A file on disk is
