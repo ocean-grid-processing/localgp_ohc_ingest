@@ -202,7 +202,7 @@ the protocol's "associated uncertainties, where available"), computed from `ohc_
 |---|---|---|
 | `STORE.zarr` (positional) | *(required)* | the input zarr store |
 | `--experiment` | *(required)* | ME4OH experiment letter (`A`/`B`/…) — the `exp<X>` filename token |
-| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`OHC_…_exp<X>_<tag>.nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
+| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`OHC_<tag>_…_exp<X>.nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
 | `--provenance-link` | *inherited from the store's `provenance_link`* | URL/path to the provenance record; written to the `provenance_link` header attr. Pass only to override. |
 | `--code-version` | *(required)* | URL to the exact publish code (commit/release); stamped as `localgp_publish_code_version`. This step's own code, distinct from the store's ingest code version. |
 | `--preset` | `me4oh` | which mask bits collapse to NaN — `me4oh` or `wmo` (see below) |

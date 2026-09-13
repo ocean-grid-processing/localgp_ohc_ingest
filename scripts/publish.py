@@ -12,7 +12,7 @@ and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
 
 The provenance tag and link are inherited from the store (stamped by the ingest --tag /
 --provenance-link) and carried onto the submission; --tag / --provenance-link override them. The
-tag is the run token in the filename (OHC_..._exp<E>_<tag>.nc) and the provenance_tag header attr.
+tag is the run token in the filename (OHC_<tag>_..._exp<E>.nc) and the provenance_tag header attr.
 
 Provenance chain: each step namespaces its own local provenance by identity — `<step>_run_config`,
 `<step>_run_facts`, `<step>_code_version` — and every step rolls all upstream `*_run_config` /
@@ -235,7 +235,7 @@ def main():
         "source_store": os.path.abspath(args.store),
     }, **compact)
 
-    fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, tag)
+    fname = "OHC_%s_%d_%d_lev%s_%s_exp%s.nc" % (tag, y0, y1, low, high, args.experiment)
     path = os.path.join(args.out, fname)
     fill = np.float64(np.nan)
     chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": fill}
@@ -268,7 +268,7 @@ def main():
         eds.attrs["note"] = ("full conditional-simulation ensemble for per-member downstream "
                              "analysis; NOT a single-field ME4OH submission")
 
-        ename = "OHCENS_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, tag)
+        ename = "OHCENS_%s_%d_%d_lev%s_%s_exp%s.nc" % (tag, y0, y1, low, high, args.experiment)
         epath = os.path.join(args.out, ename)
         nlon, nlat, ntime = len(ds["lon"]), len(ds["lat"]), len(days1900)
         eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float64(np.nan),
