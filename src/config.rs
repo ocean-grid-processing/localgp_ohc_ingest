@@ -5,9 +5,10 @@
 //! supplied separately as a [`Slice`] and is mandatory on the command line. One run
 //! processes exactly one layer; batching across layers is the job scheduler's job.
 
-use anyhow::{bail, Result};
-use serde::Deserialize;
-use std::path::PathBuf;
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// One mapped pressure layer, bounds in dbar (shallow `top`, deep `bottom`).
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -22,8 +23,10 @@ impl LayerSpec {
     }
 }
 
-/// Static constants + paths for a run (everything except the per-run slice; see `Slice`).
-#[derive(Debug, Clone, Deserialize)]
+/// Static constants + paths for a run (everything except the per-run slice; see `Slice`). The whole
+/// resolved struct is cold-serialized into the store's `run_config` provenance attr, so every field
+/// here — set anywhere in the precedence chain, or left at its default — is recorded verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunConfig {
     /// run identifier, set per-run via `--tag` (this default is a placeholder)
     #[serde(default = "default_tag")]
@@ -32,6 +35,10 @@ pub struct RunConfig {
     /// (the `--tag` metadata document). Required at runtime; this default is a placeholder.
     #[serde(default)]
     pub provenance_link: String,
+    /// link to the exact ohc_ingest code (a commit or release URL), set per-run via `--code-version`.
+    /// Required at runtime; this default is a placeholder.
+    #[serde(default)]
+    pub code_version: String,
     /// e.g. "potentialTemperature"
     pub var_name: String,
     /// e.g. "SpaceTimeTrend"
@@ -81,6 +88,7 @@ impl RunConfig {
         RunConfig {
             run_tag: default_tag(), // required via --tag
             provenance_link: String::new(), // required via --provenance-link
+            code_version: String::new(), // required via --code-version
             var_name: "potentialTemperature".into(),
             model_name: "SpaceTimeTrend".into(),
             latitude_range_to_keep: [-64.5, 64.5],
@@ -116,27 +124,119 @@ impl RunConfig {
         dir.join(fname)
     }
 
-    /// zarr store directory for a layer.
-    pub fn store_path(&self, layer: &LayerSpec) -> PathBuf {
-        self.dir_out
-            .join(format!("ohc_{}_plev{}.zarr", self.run_tag, layer.tag()))
+    /// zarr store directory for a layer. `years` is the discovered `[Ymin, Ymax]` data span, so the
+    /// store name carries the years it covers: `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr`.
+    pub fn store_path(&self, layer: &LayerSpec, years: [i32; 2]) -> PathBuf {
+        self.dir_out.join(format!(
+            "ohc_{}_{}_{}_plev{}.zarr",
+            self.run_tag, years[0], years[1], layer.tag()
+        ))
+    }
+
+    /// Fixed filename stem for a layer's monthly files: `{prefix}_{top}_{bottom}_`. A file on disk is
+    /// `{stem}{MM}_{YYYY}.mat`. The trailing underscore keeps `15_20` from matching `15_200`.
+    fn mat_stem(&self, layer: &LayerSpec, cond_sim: bool) -> String {
+        format!("{}_{}_", self.fname_prefix(cond_sim), layer.tag())
+    }
+
+    /// Discover the layer's year range by scanning the mapping directories — the run's time axis is
+    /// whatever is on disk. LocalGP writes whole calendar years, so the discovered months must tile
+    /// every year `1..=12` with no gap; a hole is a hard error naming the missing months (a missing or
+    /// misnamed file). With the ensemble on, the mean and ensemble directories must cover the
+    /// identical axis. Returns the inclusive `[Ymin, Ymax]`.
+    pub fn discover_years(&self, layer: &LayerSpec, mean_only: bool) -> Result<[i32; 2]> {
+        let mean = scan_axis(&self.dir_mean, &self.mat_stem(layer, false))?;
+        let years = validate_complete_years(&mean, "FullField mean", &self.dir_mean, layer)?;
+        if !mean_only {
+            let ens = scan_axis(&self.dir_ensemble, &self.mat_stem(layer, true))?;
+            let ens_years = validate_complete_years(&ens, "LocalCondSim ensemble", &self.dir_ensemble, layer)?;
+            if ens != mean {
+                bail!(
+                    "mean/ensemble time axes disagree for layer {}: mean covers {}..={}, ensemble {}..={} \
+                     — fix the missing files, or pass --no-ensemble for a mean-only product",
+                    layer.tag(), years[0], years[1], ens_years[0], ens_years[1]
+                );
+            }
+        }
+        Ok(years)
     }
 }
 
-/// One unit of work: a single layer over an (inclusive) year range and a month subset.
+/// Read one directory, returning the `(year, month)` set of files named `{stem}{MM}_{YYYY}.mat`.
+/// Names that don't start with the stem are ignored (other layers, other files); a name that starts
+/// with the stem but doesn't end `MM_YYYY.mat` is a hard error (a malformed mapping filename).
+fn scan_axis(dir: &Path, stem: &str) -> Result<BTreeSet<(i32, u32)>> {
+    let mut set = BTreeSet::new();
+    let entries = std::fs::read_dir(dir).with_context(|| format!("reading mapping dir {}", dir.display()))?;
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        if let Some((y, m)) = parse_month_year(&name.to_string_lossy(), stem)? {
+            set.insert((y, m));
+        }
+    }
+    Ok(set)
+}
+
+/// Parse `(year, month)` from `{stem}{MM}_{YYYY}.mat`. `Ok(None)` if the name isn't one of this
+/// layer's files (doesn't carry the stem, or isn't a `.mat`); `Err` if it carries the stem but the
+/// `MM_YYYY` tail is unparseable or the month is out of range.
+fn parse_month_year(name: &str, stem: &str) -> Result<Option<(i32, u32)>> {
+    let rest = match name.strip_prefix(stem).and_then(|r| r.strip_suffix(".mat")) {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+    let (mm, yyyy) = rest
+        .split_once('_')
+        .with_context(|| format!("malformed mapping filename {name:?}: expected {stem}MM_YYYY.mat"))?;
+    let month: u32 = mm.parse().with_context(|| format!("bad month in {name:?}"))?;
+    let year: i32 = yyyy.parse().with_context(|| format!("bad year in {name:?}"))?;
+    if !(1..=12).contains(&month) {
+        bail!("month out of range 1..=12 in {name:?}");
+    }
+    Ok(Some((year, month)))
+}
+
+/// Require the discovered axis to be whole calendar years: every year from min to max present with
+/// all twelve months. Returns `[Ymin, Ymax]`; errors (listing the holes) otherwise. LocalGP writes
+/// complete years, so a gap means missing or misnamed files.
+fn validate_complete_years(
+    axis: &BTreeSet<(i32, u32)>, label: &str, dir: &Path, layer: &LayerSpec,
+) -> Result<[i32; 2]> {
+    if axis.is_empty() {
+        bail!("no {label} .mat files found for layer {} in {}", layer.tag(), dir.display());
+    }
+    let ymin = axis.iter().map(|&(y, _)| y).min().unwrap();
+    let ymax = axis.iter().map(|&(y, _)| y).max().unwrap();
+    let missing: Vec<String> = (ymin..=ymax)
+        .flat_map(|y| (1..=12u32).map(move |m| (y, m)))
+        .filter(|ym| !axis.contains(ym))
+        .map(|(y, m)| format!("{y}-{m:02}"))
+        .collect();
+    if !missing.is_empty() {
+        bail!(
+            "{label} for layer {} spans {ymin}..={ymax} but is missing {} month(s): {} \
+             (LocalGP years must be complete)",
+            layer.tag(), missing.len(), missing.join(", ")
+        );
+    }
+    Ok([ymin, ymax])
+}
+
+/// One unit of work: a single layer over an (inclusive) year range. The year range is discovered
+/// from the mapping files (see `RunConfig::discover_years`), and every year is whole (all 12 months).
 #[derive(Debug, Clone)]
 pub struct Slice {
     pub layer: LayerSpec,
     pub years: [i32; 2],
-    pub months: Vec<u32>,
 }
 
 impl Slice {
-    /// Monthly (year, month) axis, day-15 implied.
+    /// Monthly (year, month) axis, day-15 implied — every month of every year in range.
     pub fn time_axis(&self) -> Vec<(i32, u32)> {
         let mut v = Vec::new();
         for y in self.years[0]..=self.years[1] {
-            for &m in &self.months {
+            for m in 1..=12u32 {
                 v.push((y, m));
             }
         }
@@ -168,43 +268,6 @@ pub fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     era * 146097 + doe - 719468
 }
 
-/// Parse `--years` / `OHC_YEARS`: `"2016"` → `[2016,2016]`; `"2016:2018"`/`"2016-2018"` → `[2016,2018]`.
-pub fn parse_years(s: &str) -> Result<[i32; 2]> {
-    let parts: Vec<&str> = s.split(|c| c == ':' || c == '-').collect();
-    match parts.len() {
-        1 => {
-            let y: i32 = parts[0].trim().parse()?;
-            Ok([y, y])
-        }
-        2 => Ok([parts[0].trim().parse()?, parts[1].trim().parse()?]),
-        _ => bail!("bad --years value: {s:?}"),
-    }
-}
-
-/// Parse `--months` / `OHC_MONTHS`: `"8"` → `[8]`; `"1,2,3"`; `"1:3"`/`"1-3"` → `[1,2,3]`. Validates 1..=12.
-pub fn parse_months(s: &str) -> Result<Vec<u32>> {
-    let months: Vec<u32> = if s.contains(',') {
-        s.split(',')
-            .map(|p| p.trim().parse::<u32>())
-            .collect::<std::result::Result<_, _>>()?
-    } else {
-        let parts: Vec<&str> = s.split(|c| c == ':' || c == '-').collect();
-        match parts.len() {
-            1 => vec![parts[0].trim().parse()?],
-            2 => {
-                let a: u32 = parts[0].trim().parse()?;
-                let b: u32 = parts[1].trim().parse()?;
-                (a..=b).collect()
-            }
-            _ => bail!("bad --months value: {s:?}"),
-        }
-    };
-    if months.iter().any(|&m| !(1..=12).contains(&m)) {
-        bail!("months out of range 1..=12: {months:?}");
-    }
-    Ok(months)
-}
-
 /// Parse `--layer` / `OHC_LAYER`: exactly one `top-bottom` (inner separator `-`, `_`, or `:`),
 /// e.g. `"15-20"`, `"300_700"`, `"700:1850"`. Rejects multiple layers.
 pub fn parse_layer(s: &str) -> Result<LayerSpec> {
@@ -226,17 +289,105 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_scope_overrides() {
-        assert_eq!(parse_years("2016").unwrap(), [2016, 2016]);
-        assert_eq!(parse_years("2004:2025").unwrap(), [2004, 2025]);
-        assert_eq!(parse_months("8").unwrap(), vec![8]);
-        assert_eq!(parse_months("1-3").unwrap(), vec![1, 2, 3]);
-        assert!(parse_months("13").is_err());
+    fn run_config_cold_serializes_all_fields() {
+        // The provenance block is the whole resolved struct — every field lands, defaults included.
+        let mut cfg = RunConfig::defaults();
+        cfg.code_version = "https://github.com/argovis/ohc_ingest/commit/abc123".into();
+        let json = serde_json::to_string(&cfg).unwrap();
+        for key in [
+            "run_tag", "provenance_link", "code_version", "var_name", "model_name",
+            "latitude_range_to_keep", "basins_to_remove", "bathy_clip_m", "missing_sentinel",
+            "dir_mean", "dir_ensemble", "dir_out", "etopo_path", "basinmask_path", "cp0", "rho0",
+        ] {
+            assert!(json.contains(key), "run_config missing {key}: {json}");
+        }
+        assert!(json.contains("abc123"));
+    }
+
+    #[test]
+    fn parse_layer_one_layer_only() {
         let l = parse_layer("15-20").unwrap();
         assert_eq!((l.top, l.bottom), (15, 20));
         assert_eq!(parse_layer("300_700").unwrap().bottom, 700);
         assert!(parse_layer("15-20,300-700").is_err()); // no lists
         assert!(parse_layer("15").is_err());
+    }
+
+    #[test]
+    fn parse_month_year_matches_and_rejects() {
+        let stem = "potentialTemperatureFullFieldSpaceTimeTrend_15_20_";
+        assert_eq!(
+            parse_month_year(&format!("{stem}08_2016.mat"), stem).unwrap(),
+            Some((2016, 8))
+        );
+        // other layer / other file: ignored, not an error
+        assert_eq!(parse_month_year("something_else_08_2016.mat", stem).unwrap(), None);
+        // 15_20 stem must not swallow 15_200
+        let other = "potentialTemperatureFullFieldSpaceTimeTrend_15_200_08_2016.mat";
+        assert_eq!(parse_month_year(other, stem).unwrap(), None);
+        // carries the stem but the tail is malformed / out of range: hard error
+        assert!(parse_month_year(&format!("{stem}13_2016.mat"), stem).is_err());
+        assert!(parse_month_year(&format!("{stem}zz_2016.mat"), stem).is_err());
+    }
+
+    #[test]
+    fn validate_complete_years_ok_and_holes() {
+        let layer = LayerSpec { top: 15, bottom: 20 };
+        let dir = Path::new("/tmp");
+        let mut full: BTreeSet<(i32, u32)> = BTreeSet::new();
+        for y in 2004..=2005 {
+            for m in 1..=12 {
+                full.insert((y, m));
+            }
+        }
+        assert_eq!(
+            validate_complete_years(&full, "mean", dir, &layer).unwrap(),
+            [2004, 2005]
+        );
+        // a mid-record hole is fatal
+        let mut holed = full.clone();
+        holed.remove(&(2004, 7));
+        assert!(validate_complete_years(&holed, "mean", dir, &layer).is_err());
+        // a partial final year is a hole too (LocalGP years are whole)
+        let mut partial = full.clone();
+        partial.remove(&(2005, 12));
+        assert!(validate_complete_years(&partial, "mean", dir, &layer).is_err());
+        // empty set errors
+        assert!(validate_complete_years(&BTreeSet::new(), "mean", dir, &layer).is_err());
+    }
+
+    #[test]
+    fn discover_years_scans_and_validates() {
+        // build a throwaway dir of touch-files and confirm discovery + the mean/ensemble agreement.
+        let base = std::env::temp_dir().join(format!("ohc_ingest_discover_{}", std::process::id()));
+        std::fs::remove_dir_all(&base).ok(); // clean slate if a prior run left it behind
+        let mean = base.join("mean");
+        let ens = base.join("ens");
+        std::fs::create_dir_all(&mean).unwrap();
+        std::fs::create_dir_all(&ens).unwrap();
+        let mut cfg = RunConfig::defaults();
+        cfg.dir_mean = mean.clone();
+        cfg.dir_ensemble = ens.clone();
+        let layer = LayerSpec { top: 15, bottom: 20 };
+        // mat_path routes to dir_mean / dir_ensemble by the cond_sim flag.
+        let touch = |cond_sim: bool, year: i32, month: u32| {
+            std::fs::write(cfg.mat_path(&layer, year, month, cond_sim), b"").unwrap();
+        };
+        for y in 2004..=2005 {
+            for m in 1..=12 {
+                touch(false, y, m);
+                touch(true, y, m);
+            }
+        }
+        assert_eq!(cfg.discover_years(&layer, false).unwrap(), [2004, 2005]);
+        assert_eq!(cfg.discover_years(&layer, true).unwrap(), [2004, 2005]);
+
+        // drop one ensemble month: mean-only still fine, ensemble run must complain.
+        std::fs::remove_file(cfg.mat_path(&layer, 2005, 6, true)).unwrap();
+        assert_eq!(cfg.discover_years(&layer, true).unwrap(), [2004, 2005]);
+        assert!(cfg.discover_years(&layer, false).is_err());
+
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
@@ -254,14 +405,20 @@ mod tests {
 
     #[test]
     fn slice_time_axis_and_days() {
-        let s = Slice { layer: LayerSpec { top: 15, bottom: 20 }, years: [2016, 2016], months: vec![8] };
-        assert_eq!(s.time_axis(), vec![(2016, 8)]);
+        // every year is whole: one year -> 12 months, Jan..Dec.
+        let s = Slice { layer: LayerSpec { top: 15, bottom: 20 }, years: [2016, 2016] };
+        let axis = s.time_axis();
+        assert_eq!(axis.len(), 12);
+        assert_eq!(axis[0], (2016, 1));
+        assert_eq!(axis[11], (2016, 12));
         let (days, base) = s.time_days_since_start();
-        assert_eq!(days, vec![0.0]);
-        assert_eq!(base, (2016, 8));
+        assert_eq!(base, (2016, 1));
+        assert_eq!(days[0], 0.0);
+        assert_eq!(days[1], 31.0); // Jan15 -> Feb15
 
-        let s2 = Slice { layer: LayerSpec { top: 15, bottom: 20 }, years: [2004, 2004], months: vec![1, 2] };
-        let (days, _) = s2.time_days_since_start();
-        assert_eq!(days, vec![0.0, 31.0]); // Jan15 -> Feb15 2004
+        // two years -> 24 months, contiguous across the year boundary.
+        let s2 = Slice { layer: LayerSpec { top: 15, bottom: 20 }, years: [2004, 2005] };
+        assert_eq!(s2.time_axis().len(), 24);
+        assert_eq!(s2.time_axis()[12], (2005, 1));
     }
 }

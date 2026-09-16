@@ -49,7 +49,7 @@ Full provenance, versions, and citations are in [`data/README.md`](data/README.m
 
 ## Output (the zarr store)
 
-`ohc_<tag>_plev<top>_<bottom>.zarr`, containing:
+`ohc_<tag>_<Ymin>_<Ymax>_plev<top>_<bottom>.zarr` (the years are the discovered data span), containing:
 
 - `ohc_mean` `(time, lat, lon)` — the posterior-mean OHC, J/m², NaN preserved.
 - `ohc_ensemble` `(member, time, lat, lon)` — the 100 conditional simulations, chunked one
@@ -129,15 +129,22 @@ Settings fall into three kinds by where they live:
 2. The **`--dir_*` CLI flags always win**, overriding the directory whether it came from config or
    env — the one hook for munging I/O paths per submission while keeping constants in one config.
 
-##### Per-run slice — required (CLI flag, or env)
+##### Per-run layer — required (CLI flag, or env)
 
 | setting | CLI | env | example |
 |---|---|---|---|
-| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_plev<layer>.zarr` and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
-| provenance link | `--provenance-link` | `OHC_PROVENANCE_LINK` | URL/path to the provenance record; written to the `provenance_link` attr |
+| run tag | `--tag` | `OHC_TAG` | `OP20260110` — names the store `ohc_<tag>_<Ymin>_<Ymax>_plev<layer>.zarr` (years = discovered data span) and is written to the `provenance_tag` attr (whitespace-stripped, never lowercased — must match the provenance record char-for-char) |
+| provenance link | `--provenance-link` | `OHC_PROVENANCE_LINK` | URL/path to this run's documentation; written to the `provenance_link` attr |
+| code version | `--code-version` | `OHC_CODE_VERSION` | URL to the exact ohc_ingest code (commit/release); written to the `localgp_ingest_code_version` attr |
 | layer | `--layer` | `OHC_LAYER` | `15-300`, `300_700`, `700:1850` (integer dbar; exactly one; sep `-`/`_`/`:`) |
-| years | `--years` | `OHC_YEARS` | `2016`, `2004:2025` |
-| months | `--months` | `OHC_MONTHS` | `8`, `1:3`, `1,6,12` |
+
+##### Time axis — autodetected (no flag)
+
+The run's year range is discovered from the mapping files present in `dir_mean` (and, with the
+ensemble, `dir_ensemble`) for the given layer. LocalGP writes whole calendar years, so the discovered
+months must tile every year `1..=12` with no gap; a missing month, a partial trailing year, or a
+mean/ensemble axis mismatch is a **hard error** naming the holes. The discovered `Ymin..=Ymax` is
+echoed in the run banner.
 
 ##### Run options (CLI flag, or env)
 
@@ -195,13 +202,21 @@ the protocol's "associated uncertainties, where available"), computed from `ohc_
 |---|---|---|
 | `STORE.zarr` (positional) | *(required)* | the input zarr store |
 | `--experiment` | *(required)* | ME4OH experiment letter (`A`/`B`/…) — the `exp<X>` filename token |
-| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`OHC_…_exp<X>_<tag>.nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
+| `--tag` | *inherited from the store's `provenance_tag`* | provenance tag: the **run token** in the filename (`OHC_<tag>_…_exp<X>.nc`) **and** the `provenance_tag` header attr. Defaults to what the ingest `--tag` stamped on the store; pass only to override. |
 | `--provenance-link` | *inherited from the store's `provenance_link`* | URL/path to the provenance record; written to the `provenance_link` header attr. Pass only to override. |
+| `--code-version` | *(required)* | URL to the exact publish code (commit/release); stamped as `localgp_publish_code_version`. This step's own code, distinct from the store's ingest code version. |
 | `--preset` | `me4oh` | which mask bits collapse to NaN — `me4oh` or `wmo` (see below) |
 | `--levels LOW,HIGH` | store's layer bounds | override the filename's layer bounds (meters) |
 | `--no-uncertainty` | off | skip `DATA_SD` (and the full-ensemble read) |
 | `--ensemble` | off | also write the full ensemble sibling `OHCENS_<...>.nc` (see below) |
 | `--out` | `.` | output directory |
+
+**Provenance chain.** The submission carries the store's `localgp_ingest_run_config` /
+`_run_facts` / `_code_version` forward untouched (opaque JSON strings) and adds this step's own
+`localgp_publish_run_config` (resolved args), `localgp_publish_run_facts` (preset, bounds, ensemble
+size, grid), and `localgp_publish_code_version`. Each step namespaces its block by identity, so the
+chain accretes without collision and rolls forward at every stage; the global `provenance_tag` /
+`provenance_link` stay unprefixed and shared.
 
 **Mask presets** (`--preset`): `me4oh` (default) honors only the physical/validity bits
 (`never_estimated`, `incomplete_timeseries`, `bed_above_shallow`, `bed_above_deep`) — the honest,

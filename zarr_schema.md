@@ -89,8 +89,8 @@ Conventions       = "CF-1.10"
 title             = "LocalGP ocean heat content — <tag>, <top>-<bottom> dbar"
 source            = "LocalGP <model>; var=<var>; run=<tag>"
 mapped_fields_tag = "<tag>"
-provenance_tag    = "<tag>"        # run token (= store dir-name token); --tag, char-for-char
-provenance_link   = "<url|path>"   # pointer to the provenance record; --provenance-link
+provenance_tag    = "<tag>"        # global run token (= store dir-name token); --tag, char-for-char
+provenance_link   = "<url|path>"   # global: this run's documentation; --provenance-link
 var_name          = "<var>"        # e.g. potentialTemperature
 model_name        = "<model>"      # e.g. SpaceTimeTrend
 layer_top         = <top>          # dbar, shallow edge
@@ -98,7 +98,23 @@ layer_bottom      = <bottom>       # dbar, deep edge
 cp0               = 3989.244       # J/(kg K)
 rho0              = 1030           # kg/m3
 domain            = "lon 20.5..379.5E, lat -89.5..89.5N, 1deg"
+
+# stage-namespaced local provenance (STAGE = "localgp_ingest"):
+localgp_ingest_code_version = "<url>"   # exact ohc_ingest code (commit/release); --code-version
+localgp_ingest_run_config   = "<json>"  # whole resolved RunConfig, cold-serialized (pretty JSON string)
+localgp_ingest_run_facts    = "<json>"  # derived per-run facts (pretty JSON string; see below)
 ```
+
+**Global vs local provenance.** `provenance_tag` / `provenance_link` are *global* — the run token and
+this run's documentation, shared across every step and inherited downstream unprefixed. The
+`localgp_ingest_*` attrs are this step's *local* provenance, namespaced by the step's identity so they
+roll forward untouched through later steps (each step copies every `*_run_config` / `*_run_facts` /
+`*_code_version` and adds its own). `…_run_config` is the whole resolved `RunConfig` (every setting
+used, whatever its origin — flag, env, `config.toml`, or built-in default — stamped after precedence
+collapses). `…_run_facts` is the per-run detail that isn't in the config: `layer_top`/`layer_bottom`,
+`year_min`/`year_max`, `n_timesteps`, `ensemble` (bool) and `n_members`, `grid_nlat`/`grid_nlon`. Both
+are compact (one-line) JSON **strings** — so they read as a single clean line in `ncdump -h` and carry
+unchanged into the downstream netCDF attrs.
 
 ## Ingest note: month-major in, member-major out
 

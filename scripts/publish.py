@@ -6,13 +6,19 @@ compliant submission can only say "don't use this point" via NaN, so this step c
 selected mask bits to NaN, converts J/m^2 -> TJ/m^2 and the time axis to days since 1900-01-01,
 and writes DATA(LONGITUDE, LATITUDE, TIME) under the ME4OH filename.
 
-    python publish.py STORE.zarr --experiment B \
+    python publish.py STORE.zarr --experiment B --code-version URL \
         [--tag OP20260127b] [--provenance-link URL] [--preset me4oh|wmo|wmo_wet] \
         [--levels LOW,HIGH] [--ensemble] [--out DIR]
 
 The provenance tag and link are inherited from the store (stamped by the ingest --tag /
 --provenance-link) and carried onto the submission; --tag / --provenance-link override them. The
-tag is the run token in the filename (OHC_..._exp<E>_<tag>.nc) and the provenance_tag header attr.
+tag is the run token in the filename (OHC_<tag>_..._exp<E>.nc) and the provenance_tag header attr.
+
+Provenance chain: each step namespaces its own local provenance by identity — `<step>_run_config`,
+`<step>_run_facts`, `<step>_code_version` — and every step rolls all upstream `*_run_config` /
+`*_run_facts` / `*_code_version` attrs forward untouched (opaque JSON strings) before adding its own.
+So this step copies the store's `localgp_ingest_*` blocks onto the submission verbatim and stamps
+`localgp_publish_*` (its resolved args, derived facts, and --code-version, this step's own code).
 
 Mask presets (see ../mask_spec.md):
   me4oh (default) = physical/validity bits only (never_estimated, incomplete_timeseries,
@@ -37,6 +43,7 @@ Requires: xarray, zarr>=3, numpy, netCDF4.
 """
 import argparse
 import datetime
+import json
 import os
 
 import numpy as np
@@ -102,6 +109,9 @@ def main():
     ap.add_argument("--provenance-link", default=None,
                     help="URL/path to the provenance record; written to the provenance_link header "
                          "attr. Default: inherited from the store's provenance_link.")
+    ap.add_argument("--code-version", required=True,
+                    help="URL to the exact publish code (commit/release); stamped as "
+                         "localgp_publish_code_version. (This step's own code, not the store's.)")
     ap.add_argument("--preset", default="me4oh", choices=list(PRESETS))
     ap.add_argument("--levels", default=None, help="LOW,HIGH meters for the filename (default: store layer bounds)")
     ap.add_argument("--no-uncertainty", action="store_true",
@@ -196,7 +206,36 @@ def main():
     if include_sd:
         out.attrs["ensemble_size"] = int(ds.sizes["member"])
 
-    fname = "OHC_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, tag)
+    # --- provenance katamari: roll every upstream step's block forward untouched, then add ours ---
+    # Each step namespaces its own local provenance by identity, so the chain accretes without
+    # collision and downstream never has to know who produced what. We copy the upstream blocks as
+    # opaque JSON strings (no parse/re-serialize) and stamp localgp_publish_* for this step.
+    STAGE = "localgp_publish"
+    for k, v in g.items():
+        if k.endswith(("_run_config", "_run_facts", "_code_version")):
+            out.attrs[k] = v
+    resolved_cfg = dict(vars(args))                    # every resolved flag, no schema to maintain
+    resolved_cfg["tag"] = tag                          # effective values (inherited-or-overridden)
+    resolved_cfg["provenance_link"] = prov_link
+    compact = dict(separators=(",", ":"), default=str)     # one-line JSON, clean in `ncdump -h`
+    out.attrs["%s_code_version" % STAGE] = args.code_version
+    out.attrs["%s_run_config" % STAGE] = json.dumps(resolved_cfg, **compact)
+    out.attrs["%s_run_facts" % STAGE] = json.dumps({
+        "period": "%d_%d" % (y0, y1),
+        "layer_m": "%s_%s" % (low, high),
+        "mapped_layer": "%d_%d" % (int(g["layer_top"]), int(g["layer_bottom"])),
+        "preset": args.preset,
+        "mask_applied": PRESETS[args.preset],
+        "mask_value": int(mval),
+        "include_sd": bool(include_sd),
+        "ensemble_written": bool(args.ensemble),
+        "ensemble_size": int(ds.sizes["member"]) if has_ens else None,
+        "n_timesteps": int(len(days1900)),
+        "grid_nlon": int(len(ds["lon"])), "grid_nlat": int(len(ds["lat"])),
+        "source_store": os.path.abspath(args.store),
+    }, **compact)
+
+    fname = "OHC_%s_%d_%d_lev%s_%s_exp%s.nc" % (tag, y0, y1, low, high, args.experiment)
     path = os.path.join(args.out, fname)
     fill = np.float64(np.nan)
     chunk_enc = {"zlib": True, "complevel": 4, "_FillValue": fill}
@@ -229,7 +268,7 @@ def main():
         eds.attrs["note"] = ("full conditional-simulation ensemble for per-member downstream "
                              "analysis; NOT a single-field ME4OH submission")
 
-        ename = "OHCENS_%d_%d_lev%s_%s_exp%s_%s.nc" % (y0, y1, low, high, args.experiment, tag)
+        ename = "OHCENS_%s_%d_%d_lev%s_%s_exp%s.nc" % (tag, y0, y1, low, high, args.experiment)
         epath = os.path.join(args.out, ename)
         nlon, nlat, ntime = len(ds["lon"]), len(ds["lat"]), len(days1900)
         eenc = {"DATA": {"zlib": True, "complevel": 4, "_FillValue": np.float64(np.nan),
